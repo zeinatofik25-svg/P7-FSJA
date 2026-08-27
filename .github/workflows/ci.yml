@@ -147,7 +147,7 @@ jobs:
         run: ./gradlew dependencies
 
       - name: Fail on committed secrets
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -155,7 +155,7 @@ jobs:
           exit-code: '1'
 
       - name: Report filesystem vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
           scan-type: fs
@@ -200,7 +200,7 @@ jobs:
 
       - name: SonarQube Cloud scan
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-scan-action@v6.0.0
+        uses: SonarSource/sonarqube-scan-action@v8
         env:
           SONAR_HOST_URL: https://sonarcloud.io
         with:
@@ -214,5 +214,5 @@ jobs:
 
       - name: Check SonarQube Quality Gate
         if: env.SONAR_TOKEN != ''
-        uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
+        uses: SonarSource/sonarqube-quality-gate-action@v1.2.1
         timeout-minutes: 10

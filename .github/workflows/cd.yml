@@ -1,0 +1,75 @@
+name: Continuous Deployment
+
+on:
+  workflow_run:
+    workflows:
+      - Continuous Integration
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish validated Docker images
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout validated commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/microcrm-front
+            ghcr.io/${{ github.repository_owner }}/microcrm-back
+          tags: |
+            type=sha,prefix=,format=long
+            type=raw,value=main
+
+      - name: Build and publish frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: front
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/microcrm-front:${{ github.event.workflow_run.head_sha }}
+            ghcr.io/${{ github.repository_owner }}/microcrm-front:main
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=microcrm-front
+          cache-to: type=gha,mode=max,scope=microcrm-front
+
+      - name: Build and publish backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: back
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/microcrm-back:${{ github.event.workflow_run.head_sha }}
+            ghcr.io/${{ github.repository_owner }}/microcrm-back:main
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=microcrm-back
+          cache-to: type=gha,mode=max,scope=microcrm-back

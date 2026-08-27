@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build, verify and publish release artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate SemVer version
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "Tag $TAG does not follow SemVer (vMAJOR.MINOR.PATCH)."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "$VERSION" | grep -q '-'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+
+      - name: Build backend
+        working-directory: back
+        run: |
+          chmod +x gradlew
+          ./gradlew build -PappVersion=${{ steps.version.outputs.version }}
+
+      - name: Build frontend
+        working-directory: front
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify the packaged application starts
+        run: |
+          java -jar back/build/libs/microcrm-${{ steps.version.outputs.version }}.jar &
+          APP_PID=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/persons > /dev/null; then
+              echo "Application started successfully."
+              kill $APP_PID
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Application did not answer on /persons."
+          kill $APP_PID
+          exit 1
+
+      - name: Package frontend bundle
+        run: |
+          cd front/dist/microcrm/browser
+          zip -r "$GITHUB_WORKSPACE/microcrm-front-${{ steps.version.outputs.version }}.zip" .
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MicroCRM ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          files: |
+            back/build/libs/microcrm-${{ steps.version.outputs.version }}.jar
+            microcrm-front-${{ steps.version.outputs.version }}.zip

@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'com.openclassroom.devops.orion'
-version = '0.0.1-SNAPSHOT'
+version = project.findProperty('appVersion') ?: '0.0.1-SNAPSHOT'
 
 java {
 	sourceCompatibility = '17'

@@ -209,6 +209,8 @@ jobs:
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
             -Dsonar.sources=back/src/main,front/src
             -Dsonar.tests=back/src/test,front/src
+            -Dsonar.test.inclusions=back/src/test/**/*.java,front/src/**/*.spec.ts
+            -Dsonar.exclusions=back/src/test/**/*.java,front/src/**/*.spec.ts
             -Dsonar.java.binaries=back/build/classes/java/main
             -Dsonar.javascript.lcov.reportPaths=front/coverage/microcrm/lcov.info
 

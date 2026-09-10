@@ -212,6 +212,14 @@ jobs:
           curl --fail --silent --show-error \
             --user "${SONAR_TOKEN}:" \
             "https://sonarcloud.io/api/projects/search?projects=${SONAR_PROJECT_KEY}&organization=${SONAR_ORGANIZATION}" > /dev/null
+          # Same endpoint family used by sonar.qualitygate.wait; a 403 here means
+          # the token's user lacks the project-level "Browse" permission.
+          if ! curl --fail --silent --show-error \
+              --user "${SONAR_TOKEN}:" \
+              "https://sonarcloud.io/api/qualitygates/project_status?projectKey=${SONAR_PROJECT_KEY}&organization=${SONAR_ORGANIZATION}" > /dev/null; then
+            echo "::error::SONAR_TOKEN can search the project but cannot read its analysis/quality gate status. Grant the token's SonarCloud user the 'Browse' permission on project ${SONAR_PROJECT_KEY} (Project > Administration > Permissions), then re-run this workflow."
+            exit 1
+          fi
 
       - name: SonarQube Cloud scan
         if: env.SONAR_TOKEN != ''

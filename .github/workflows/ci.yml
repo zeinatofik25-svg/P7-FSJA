@@ -217,4 +217,7 @@ jobs:
       - name: Check SonarQube Quality Gate
         if: env.SONAR_TOKEN != ''
         uses: SonarSource/sonarqube-quality-gate-action@7a5fffe8e523c40e0c740b6bc2712ab503e52efa
+        env:
+          SONAR_HOST_URL: https://sonarcloud.io
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         timeout-minutes: 10

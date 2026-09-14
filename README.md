@@ -71,7 +71,7 @@ Au moment de cette rédaction, aucun rapport SonarQube Cloud exporté ni aucune 
 | P1 | Vulnérabilités | Relever les vulnérabilités et Security Hotspots Java/TypeScript ouvertes | Exploitation d'une faiblesse identifiée par SonarQube | Corriger immédiatement les vulnérabilités critiques et hautes ; examiner chaque Security Hotspot avant fusion |
 | P1 | Dépendances | Relever les alertes des dépendances directes et transitives | Composant connu vulnérable | Mettre à jour de manière compatible ; contrôler aussi `npm audit` et le scan Trivy |
 | P2 | Validation des entrées | **Constaté** : aucun contrat DTO ni annotation de validation n'est visible sur l'entité `Person` | Données invalides, volumétrie non maîtrisée et erreurs applicatives | Introduire des DTO et les contraintes `@NotBlank`, `@Email`, longueurs maximales ; ajouter les tests 400 associés |
-| P2 | Couverture backend | Relever la couverture Java ; le workflow ne fournit pas encore de rapport JaCoCo à SonarQube | Zones REST et erreurs non protégées par des tests | Ajouter JaCoCo, publier le rapport XML et viser 80 % sur le nouveau code |
+| P2 | Couverture backend | Relever la couverture Java mesurée par JaCoCo et importée depuis `back/build/reports/jacoco/test/jacocoTestReport.xml` | Zones REST et erreurs non protégées par des tests | Compléter les tests des cas d'erreur et viser 80 % sur le nouveau code |
 | P2 | Couverture frontend | Relever la couverture LCOV importée depuis `front/coverage/microcrm/lcov.info` | Régression de composants/services Angular | Ajouter les tests d'erreur HTTP, de formulaire et de navigation ; viser 80 % sur le nouveau code |
 | P2 | Duplications | Relever le pourcentage de duplication global et sur le nouveau code, séparément pour Java et TypeScript | Corrections incohérentes et maintenance coûteuse | Extraire les méthodes/services communs uniquement lorsque SonarQube confirme une duplication significative |
 | P2 | Complexité | Trier les méthodes et composants par complexité cognitive et nombre de branches | Défauts difficiles à détecter et tester | Découper les méthodes au-dessus du seuil du Quality Profile, avec tests de non-régression |
@@ -150,7 +150,7 @@ Après chaque déploiement sur `main`, relever le SHA, l'heure du commit, l'heur
 | SHA | Commit livré (UTC) | Fin CD (UTC) | Durée CI | Quality Gate | Incident / rollback | Retour au service (UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
 | `f0e274c` | 2026-09-14 10:18:31 | 2026-09-14 11:13:01 | 2 min 26 s | OK | Non | Sans objet |
-| À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
+| `7533d6d` | 2026-09-14 19:17:33 | 2026-09-14 19:30:38 | 2 min 11 s | OK | Non | Sans objet |
 | À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
 
 L'heure de commit retenue est la date d'auteur du commit applicatif (`af7d58e`), et non celle du commit de fusion : c'est le moment où le changement a été écrit, conformément à la définition du Lead Time. Le mode de fusion « merge commit » a été choisi pour cette raison, un squash réécrivant l'horodatage d'origine et ramenant artificiellement la métrique à quelques minutes.
@@ -247,7 +247,7 @@ Le workflow [`ci.yml`](.github/workflows/ci.yml) centralise l'intégration conti
 
 Les jobs s'exécutent comme suit :
 
-1. `backend` installe Java 17, utilise le Gradle Wrapper, exécute `./gradlew build collectSonarLibraries` et conserve les rapports de tests, les classes compilées de production et de test ainsi que les dépendances du classpath.
+1. `backend` installe Java 17, utilise le Gradle Wrapper, exécute `./gradlew build collectSonarLibraries` et conserve les rapports de tests, la couverture JaCoCo, les classes compilées de production et de test ainsi que les dépendances du classpath.
 2. `frontend` installe Node.js 20 et Chrome, exécute `npm ci`, les tests Karma en mode `ChromeHeadlessNoSandbox`, puis `npm run build`. Les rapports de couverture et le dossier `dist` sont conservés.
 3. `security` exécute `npm audit --audit-level=high`, résout les dépendances Gradle et lance Trivy sur le dépôt pour détecter les vulnérabilités critiques/élevées et les secrets accidentellement présents.
 4. `sonar`, dépendant des deux builds, récupère les classes Java, le classpath de compilation et la couverture frontend, puis soumet l'analyse à SonarQube Cloud. Le Quality Gate est vérifié séparément par le check GitHub **SonarCloud Code Analysis**, posté directement par l'application SonarCloud sur la pull request et le commit ; ce check doit être ajouté aux règles de protection de la branche `main` pour bloquer réellement une fusion en cas d'échec.

@@ -59,6 +59,54 @@ Les indicateurs surveillés sont :
 - la couverture et les tests manquants sur le nouveau code ;
 - les dépendances vulnérables et obsolètes, en complément des outils de gestion des dépendances.
 
+#### Résultats, analyse et priorités SonarQube
+
+Au moment de cette rédaction, aucun rapport SonarQube Cloud exporté ni aucune exécution analysée n'est disponible dans le dépôt. Il serait incorrect d'attribuer un nombre de vulnérabilités, de duplications ou un pourcentage de couverture à SonarQube sans cette preuve. Le tableau suivant constitue donc le backlog de revue prioritaire : les éléments marqués **constaté** ont été vérifiés dans le code ; les autres sont à qualifier avec la sévérité et la règle exacte proposées par SonarQube lors de la première analyse complète.
+
+| Priorité | Domaine | Constat ou contrôle SonarQube à relever | Risque | Traitement attendu |
+| --- | --- | --- | --- | --- |
+| P1 | Exposition API | **Constaté** : les repositories Spring Data REST exposent lecture et écriture des personnes et organisations, sans mécanisme d'authentification applicatif visible | Modification ou consultation non autorisée de données personnelles | Ajouter une authentification et une autorisation par rôle avant tout déploiement public |
+| P1 | CORS | **Constaté** : la configuration autorise l'origine `*` sur toutes les routes | Une application tierce peut appeler l'API depuis le navigateur d'un utilisateur | Limiter les origines aux URL de l'interface selon l'environnement ; interdire toute origine non attendue |
+| P1 | Données personnelles | **Constaté** : `Person` contient e-mail, téléphone et biographie | Exposition de données personnelles par l'API ou les logs | Minimiser les champs exposés, documenter la conservation et ne jamais journaliser les objets `Person` complets |
+| P1 | Vulnérabilités | Relever les vulnérabilités et Security Hotspots Java/TypeScript ouvertes | Exploitation d'une faiblesse identifiée par SonarQube | Corriger immédiatement les vulnérabilités critiques et hautes ; examiner chaque Security Hotspot avant fusion |
+| P1 | Dépendances | Relever les alertes des dépendances directes et transitives | Composant connu vulnérable | Mettre à jour de manière compatible ; contrôler aussi `npm audit` et le scan Trivy |
+| P2 | Validation des entrées | **Constaté** : aucun contrat DTO ni annotation de validation n'est visible sur l'entité `Person` | Données invalides, volumétrie non maîtrisée et erreurs applicatives | Introduire des DTO et les contraintes `@NotBlank`, `@Email`, longueurs maximales ; ajouter les tests 400 associés |
+| P2 | Couverture backend | Relever la couverture Java ; le workflow ne fournit pas encore de rapport JaCoCo à SonarQube | Zones REST et erreurs non protégées par des tests | Ajouter JaCoCo, publier le rapport XML et viser 80 % sur le nouveau code |
+| P2 | Couverture frontend | Relever la couverture LCOV importée depuis `front/coverage/microcrm/lcov.info` | Régression de composants/services Angular | Ajouter les tests d'erreur HTTP, de formulaire et de navigation ; viser 80 % sur le nouveau code |
+| P2 | Duplications | Relever le pourcentage de duplication global et sur le nouveau code, séparément pour Java et TypeScript | Corrections incohérentes et maintenance coûteuse | Extraire les méthodes/services communs uniquement lorsque SonarQube confirme une duplication significative |
+| P2 | Complexité | Trier les méthodes et composants par complexité cognitive et nombre de branches | Défauts difficiles à détecter et tester | Découper les méthodes au-dessus du seuil du Quality Profile, avec tests de non-régression |
+| P2 | Fiabilité | Relever bugs, exceptions non traitées et code mort signalés | Erreurs de production ou dette technique | Corriger les bugs bloquants avant fusion ; planifier les code smells dans le sprint suivant |
+| P3 | Maintenabilité | Relever code smells, dette estimée et règles de style | Lisibilité réduite et coût de changement | Traiter les alertes sur le nouveau code ; ne pas entreprendre de refactoring massif sans besoin métier |
+
+Les éléments P1 constituent des risques de sécurité ou de confidentialité ; ils ne doivent pas être assimilés aux code smells P3. Les duplications et la complexité sont principalement des indicateurs de maintenabilité et deviennent des risques de fiabilité lorsqu'ils empêchent de tester ou de corriger le code avec confiance.
+
+#### Quality Gate et règles de traitement
+
+Le Quality Gate appliqué aux pull requests et à `main` doit exiger : aucune nouvelle vulnérabilité ni nouveau bug bloquant, aucune Security Hotspot non examinée, une couverture d'au moins 80 % sur le nouveau code et un taux de duplication inférieur à 3 % sur le nouveau code. La première analyse doit être archivée dans la documentation de sprint avec : date, branche/SHA, statut du Quality Gate, nombre de bugs, vulnérabilités, Security Hotspots, code smells, duplications, complexité et couverture, séparés par langage lorsque SonarQube les fournit.
+
+| Relevé SonarQube | Valeur à compléter après analyse | Décision |
+| --- | --- | --- |
+| Quality Gate | À compléter | Échec : fusion bloquée |
+| Vulnérabilités ouvertes | À compléter | Toute criticité haute ou critique : correction prioritaire |
+| Security Hotspots examinées | À compléter | 100 % requis avant livraison |
+| Bugs | À compléter | Bloquant/critique : correction avant fusion |
+| Duplications nouveau code | À compléter | Supérieur à 3 % : justification ou refactoring ciblé |
+| Complexité des méthodes prioritaires | À compléter | Découpage et tests lorsque le seuil du profil est dépassé |
+| Couverture nouveau code Java | À compléter | Inférieure à 80 % : ajouter les tests et le rapport JaCoCo |
+| Couverture nouveau code TypeScript | À compléter | Inférieure à 80 % : ajouter les tests Jasmine/Karma |
+
+#### Croisement SonarQube, CI et ELK
+
+Après chaque livraison, surveiller Kibana pendant les 15 premières minutes avec `service_name: "microcrm-back" and log_level: "ERROR"`, puis comparer le taux d'erreurs à la période précédant le déploiement. Une alerte SonarQube de fiabilité ou de validation devient prioritaire si elle correspond à une hausse de ces erreurs. Inversement, une erreur répétée dans ELK doit conduire à créer un test de régression puis à consulter les règles SonarQube de la zone concernée. Les logs ne doivent contenir ni e-mail, ni téléphone, ni biographie, ni jeton : une telle apparition est un incident de sécurité à traiter immédiatement.
+
+#### Plan de remédiation
+
+1. Avant exposition hors environnement local, restreindre CORS, protéger les routes REST et vérifier que les réponses API ne retournent que les données nécessaires.
+2. Ajouter validation, limites de taille et tests négatifs sur les créations et modifications de personnes et d'organisations.
+3. Configurer JaCoCo pour le backend, conserver LCOV pour le frontend et transmettre les deux rapports à SonarQube.
+4. Après les trois premières CI, relever les alertes SonarQube, traiter tout P1, puis planifier les P2 confirmés avec un responsable et une échéance de sprint.
+5. Réexaminer chaque sprint les vulnérabilités, Security Hotspots, dépendances, erreurs ELK et le statut du Quality Gate ; fermer le ticket seulement après validation par CI et absence de récidive dans les logs.
+
 #### Règles de la CI
 
 - Le token `SONAR_TOKEN`, les identifiants du registre et toute configuration sensible sont stockés dans les secrets GitHub ou dans les variables d'environnement de l'environnement de déploiement. Ils ne sont jamais écrits dans le dépôt, les Dockerfiles ou les journaux.
@@ -68,6 +116,50 @@ Les indicateurs surveillés sont :
 - Les entrées reçues par l'API sont validées, les erreurs ne révèlent pas de détails internes et les logs ne contiennent pas de données personnelles. Les règles OWASP applicables aux API REST et aux applications web Angular sont vérifiées lors de chaque revue.
 
 Les alertes SonarQube, Dependabot et les scans de dépendances sont triés à chaque sprint. Une vulnérabilité critique fait l'objet d'un traitement prioritaire et peut déclencher une mise en pause des publications.
+
+### Métriques DORA et KPIs opérationnels
+
+Les métriques DORA permettent de mesurer séparément la vitesse de livraison et la fiabilité. Elles sont calculées sur une période glissante de 30 jours et révisées à chaque sprint. Les sources CI/CD sont l'historique GitHub Actions et GitHub Deployments ; les sources applicatives sont les index `microcrm-logs-*` dans Kibana. Une métrique n'est pas calculée à partir d'une estimation : les trois premières livraisons et les éventuels incidents doivent être consignés avant d'établir une valeur de référence.
+
+#### Tableau provisoire DORA
+
+| Métrique DORA | Méthode de calcul | Source | Valeur initiale | Cible après 3 sprints |
+| --- | --- | --- | --- | --- |
+| Lead Time for Changes | Médiane entre l'heure du commit livré sur `main` et la fin du workflow CD associé au même SHA | GitHub commits et fin du workflow `Continuous Deployment` | Non mesurable : aucune livraison CD historisée dans le dépôt local | Moins de 1 jour ouvré |
+| Deployment Frequency | Nombre de déploiements CD réussis sur `main` / 7 jours | Workflows `Continuous Deployment` réussis | Non mesurable : aucune exécution CD disponible | Au moins 1 déploiement par semaine |
+| Mean Time to Restore (MTTR) | Moyenne entre le début d'un incident horodaté et le retour à un contrôle de santé réussi | Incident, logs Kibana, horodatage du rollback ou du correctif déployé | Non mesurable : aucun incident consigné | Moins de 4 heures |
+| Change Failure Rate | (Déploiements ayant causé incident, rollback ou hotfix urgent / déploiements totaux) x 100 | GitHub Deployments, incidents et tickets | Non mesurable : aucune livraison CD disponible | Inférieur à 15 % |
+
+Le taux d'échec ne doit compter qu'un déploiement une seule fois, même s'il produit plusieurs erreurs. Un échec de CI avant déploiement reste un signal de qualité, mais ne constitue pas un échec de changement DORA. De la même manière, une erreur isolée dans Kibana n'est un incident que si elle dégrade le service ou exige une intervention.
+
+#### KPIs complémentaires
+
+| KPI | Méthode de calcul | Source | Cible opérationnelle | Action si seuil dépassé |
+| --- | --- | --- | --- | --- |
+| Durée CI | Médiane de la durée totale des 3 derniers workflows `Continuous Integration` réussis | GitHub Actions | Moins de 15 min | Identifier l'étape lente et exploiter le cache Gradle/npm |
+| Taux de réussite CI | (Workflows CI réussis / workflows CI terminés) x 100 sur 30 jours | GitHub Actions | Au moins 95 % | Corriger ou isoler le test instable avant nouveau merge |
+| Durée des tests | Durée médiane des étapes `Build and test` et `Run unit tests with coverage` | Logs GitHub Actions | Backend moins de 5 min, frontend moins de 8 min | Réduire les tests redondants ou améliorer le cache |
+| Couverture de tests | Couverture du nouveau code mesurée par SonarQube ; couverture globale suivie à titre indicatif | SonarQube Cloud et `front/coverage` | Au moins 80 % sur le nouveau code | Ajouter des tests avant validation de la pull request |
+| Qualité SonarQube | Quality Gate réussi, avec 0 vulnérabilité et 0 bug bloquant sur le nouveau code | SonarQube Cloud | 100 % des Quality Gates réussis | Bloquer la fusion et corriger les alertes |
+| Fréquence d'erreurs applicatives | Nombre de logs `ERROR` / nombre total de logs sur 15 min, ventilé par `service_name` | Kibana, index `microcrm-logs-*` | Inférieur à 1 % | Investiguer les erreurs répétées et créer un incident si le service est impacté |
+
+#### Procédure de relève
+
+Après chaque déploiement sur `main`, relever le SHA, l'heure du commit, l'heure de fin de CD, le statut du Quality Gate, la durée CI et la présence d'un incident. Conserver au minimum les trois relevés suivants dans le tableau de suivi de sprint :
+
+| SHA | Commit livré (UTC) | Fin CD (UTC) | Durée CI | Quality Gate | Incident / rollback | Retour au service (UTC) |
+| --- | --- | --- | --- | --- | --- | --- |
+| À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
+| À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
+| À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
+
+Pour Kibana, le panneau `Erreurs par service` utilise le filtre KQL `log_level: "ERROR"`. Le KPI de fréquence d'erreurs se calcule avec le même intervalle que le panneau de volume : $taux\ d'erreurs = \frac{nombre\ de\ logs\ ERROR}{nombre\ total\ de\ logs} \times 100$. Lors d'un pic de volume, comparer cette valeur avec la période précédente : un volume élevé sans hausse du taux d'erreurs correspond à une activité accrue, tandis qu'une hausse simultanée signale un risque de fiabilité.
+
+#### Analyse initiale et recommandations
+
+Le pipeline est conçu pour limiter les changements risqués : tests backend et frontend, audit des dépendances, recherche de secrets et Quality Gate SonarQube précèdent la publication. Le workflow CD est déclenché seulement pour une CI réussie provenant d'un push sur `main`, ce qui assure la traçabilité du SHA livré. En revanche, aucune exécution CI/CD et aucun incident de production ne sont disponibles dans les données locales ; les quatre métriques DORA ne peuvent donc pas être chiffrées de manière fiable à ce stade.
+
+La priorité du prochain sprint est de réaliser au moins trois livraisons sur `main`, de compléter le tableau de relève pour chacune et d'enregistrer les incidents avec heures de début et de résolution. L'équipe pourra alors remplacer les valeurs provisoires par les médianes et moyennes observées. Les tableaux Kibana complètent ces métriques en révélant les pics de charge et la fréquence des erreurs après livraison ; ils ne remplacent pas l'horodatage des déploiements ni la déclaration d'incident nécessaires au calcul DORA.
 
 ### Principes de conteneurisation et de déploiement
 
@@ -82,6 +174,61 @@ Les images de construction utilisent `node:20-alpine` et Eclipse Temurin JDK 17.
 #### Rôle de Docker Compose
 
 `docker compose` décrit l'exécution locale et l'environnement de validation : un service `front`, un service `back`, un réseau interne et les ports publiés nécessaires. Il doit fournir les variables de configuration, les dépendances de démarrage et des contrôles de santé. Compose sert à reproduire le déploiement et à réaliser le smoke test ; il ne remplace pas un orchestrateur de production lorsque la haute disponibilité est nécessaire.
+
+### Monitoring local ELK
+
+Le monitoring local est isolé dans [`docker-compose-elk.yml`](docker-compose-elk.yml) afin de ne pas alourdir la CI/CD ni le démarrage standard de l'application. Il déploie Elasticsearch 8.15.3 (stockage et recherche), Logstash 8.15.3 (collecte et normalisation) et Kibana 8.15.3 (exploration et tableaux de bord). La pile est destinée au poste de développement : l'authentification Elastic est désactivée et Elasticsearch réserve 1 Go de heap, Logstash 512 Mo. Prévoir au moins 4 Go de RAM disponible pour Docker Desktop.
+
+Les services applicatifs continuent d'écrire sur leur sortie standard. Le driver Docker `gelf` envoie ces flux à Logstash en UDP sur le port `12201`, sans bibliothèque d'observabilité ni agent dans les conteneurs. Le backend produit des événements JSON Logback, avec le champ `service` à `microcrm-back`. Caddy produit également ses accès et ses erreurs en JSON, chaque requête HTTP donnant un document avec `application_log.status`, `application_log.request.uri` et `application_log.duration`. Logstash décode les événements JSON lorsqu'il le peut, conserve le message brut sinon, puis indexe les documents dans `microcrm-logs-AAAA.MM.JJ`.
+
+Deux champs sont normalisés par Logstash pour que les tableaux de bord restent exploitables :
+
+- `service_name` vaut `microcrm-back` ou `microcrm-front`. Il est repris du champ `service` du JSON applicatif et, à défaut, du `tag` déclaré sur le driver `gelf` dans [`docker-compose.yml`](docker-compose.yml). Sans cette reprise, les lignes non JSON du backend (démarrage de la JVM, arrêt du conteneur) seraient ventilées sous le nom du conteneur Docker et sépareraient artificiellement un même service en deux séries.
+- `log_level` est mis en majuscules. Logback émet `INFO`/`WARN`/`ERROR` alors que Caddy émet `info`/`warn`/`error` ; sans normalisation, une agrégation sur `log_level.keyword` produit deux compartiments par niveau. Les lignes non JSON reçoivent le niveau déduit de la sévérité syslog transmise par le driver `gelf`.
+
+#### Démarrage et arrêt
+
+Depuis la racine du dépôt, démarrer d'abord ELK, puis l'application :
+
+```shell
+docker compose -f docker-compose-elk.yml up --build -d
+docker compose -f docker-compose-elk.yml ps
+docker compose up --build -d
+```
+
+Kibana est accessible sur http://localhost:5601 et Elasticsearch sur http://localhost:9200. Après quelques requêtes dans l'interface MicroCRM, vérifier les documents indexés :
+
+```shell
+curl http://localhost:9200/microcrm-logs-*/_count
+```
+
+Pour arrêter ELK tout en conservant les index locaux :
+
+```shell
+docker compose -f docker-compose-elk.yml down
+```
+
+Ajouter `-v` à cette dernière commande uniquement pour supprimer les données Elasticsearch locales et repartir d'un environnement vierge.
+
+#### Tableau de bord Kibana
+
+Dans **Stack Management > Data Views**, créer la vue `microcrm-logs-*` et choisir `@timestamp` comme champ temporel. Dans **Discover**, vérifier que les logs du backend affichent `application_log.level`, `application_log.message` et `service_name`, puis enregistrer la recherche `MicroCRM - Logs`.
+
+Créer ensuite le tableau de bord `MicroCRM - Santé applicative` avec ces visualisations :
+
+| Visualisation | Configuration | Indicateur suivi |
+| --- | --- | --- |
+| Volume des événements | Histogramme temporel, agrégation `Count`, intervalle automatique | Activité et pics de charge |
+| Erreurs par service | Barres, filtre KQL `log_level: "ERROR"`, ventilation par `service_name.keyword` | Services en erreur et volumétrie des incidents |
+| Répartition des niveaux | Donut, agrégation `Count`, découpage par `log_level.keyword` | Tendance INFO/WARN/ERROR |
+
+Le filtre de période de Kibana doit être positionné sur les 15 dernières minutes pendant une démonstration. Les requêtes HTTP vers le front génèrent des événements Caddy et les appels API ou erreurs backend génèrent des événements Spring Boot. Pour investiguer une erreur, filtrer `service_name: "microcrm-back" and log_level: "ERROR"`, puis consulter le champ `application_log.stack_trace` lorsqu'il existe.
+
+En fonctionnement nominal, le backend ne journalise pas chaque requête : le volume observé provient très majoritairement des accès Caddy, et un document `microcrm-back` correspond donc à un événement de cycle de vie ou à une anomalie. Une indisponibilité du backend est visible immédiatement via `application_log.status: 502`, Caddy journalisant l'échec du `reverse_proxy` au niveau `ERROR`. C'est ce signal qui alimente le KPI de fréquence d'erreurs et l'horodatage de détection d'un incident.
+
+#### Diagnostic local
+
+Si aucun événement n'apparaît, vérifier dans cet ordre que Logstash écoute (`docker compose -f docker-compose-elk.yml logs logstash`), que les conteneurs MicroCRM ont été recréés après le démarrage d'ELK (`docker compose up -d --force-recreate`) et que Docker Desktop peut joindre `host.docker.internal`. Cette adresse est la passerelle de l'hôte fournie par Docker Desktop sous Windows et permet au driver de logs de joindre le port Logstash publié. Le monitoring local est volontairement exclu des workflows CI/CD en raison de son coût mémoire et de l'absence de besoin de rétention longue durée.
 
 #### Stratégie de déploiement
 
@@ -101,7 +248,7 @@ Les jobs s'exécutent comme suit :
 1. `backend` installe Java 17, utilise le Gradle Wrapper, exécute `./gradlew build` et conserve les rapports de tests ainsi que les classes compilées.
 2. `frontend` installe Node.js 20 et Chrome, exécute `npm ci`, les tests Karma en mode `ChromeHeadlessNoSandbox`, puis `npm run build`. Les rapports de couverture et le dossier `dist` sont conservés.
 3. `security` exécute `npm audit --audit-level=high`, résout les dépendances Gradle et lance Trivy sur le dépôt pour détecter les vulnérabilités critiques/élevées et les secrets accidentellement présents.
-4. `sonar`, dépendant des deux builds, récupère les classes Java et la couverture frontend, lance l'analyse SonarQube Cloud, puis échoue si le Quality Gate est invalide.
+4. `sonar`, dépendant des deux builds, récupère les classes Java et la couverture frontend, puis soumet l'analyse à SonarQube Cloud. Le Quality Gate est vérifié séparément par le check GitHub **SonarCloud Code Analysis**, posté directement par l'application SonarCloud sur la pull request et le commit ; ce check doit être ajouté aux règles de protection de la branche `main` pour bloquer réellement une fusion en cas d'échec.
 
 #### Configuration GitHub requise
 

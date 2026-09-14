@@ -1,0 +1,13 @@
+<configuration>
+    <springProperty name="logLevel" source="logging.level.root" defaultValue="INFO" />
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"microcrm-back"}</customFields>
+        </encoder>
+    </appender>
+
+    <root level="${logLevel}">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>

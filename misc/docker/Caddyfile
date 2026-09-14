@@ -1,4 +1,16 @@
+{
+	log {
+		output stdout
+		format json
+	}
+}
+
 :80 {
+	log {
+		output stdout
+		format json
+	}
+
 	handle_path /api/* {
 		reverse_proxy back:8080
 	}

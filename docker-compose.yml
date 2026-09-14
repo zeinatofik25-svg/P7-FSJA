@@ -9,6 +9,11 @@ services:
       - "8080"
     ports:
       - "8080:8080"
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://host.docker.internal:12201"
+        tag: "microcrm-back"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/persons || exit 1"]
       interval: 10s
@@ -27,6 +32,11 @@ services:
         condition: service_healthy
     ports:
       - "80:80"
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "udp://host.docker.internal:12201"
+        tag: "microcrm-front"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
       interval: 10s

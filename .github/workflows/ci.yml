@@ -47,6 +47,7 @@ jobs:
             back/build/classes/java/main
             back/build/classes/java/test
             back/build/sonar-libraries
+            back/build/reports/jacoco
           if-no-files-found: error
 
       - name: Upload backend reports
@@ -222,4 +223,5 @@ jobs:
             -Dsonar.java.test.binaries=back/build/classes/java/test
             -Dsonar.java.libraries=back/build/sonar-libraries/*.jar
             -Dsonar.java.test.libraries=back/build/sonar-libraries/*.jar
+            -Dsonar.coverage.jacoco.xmlReportPaths=back/build/reports/jacoco/test/jacocoTestReport.xml
             -Dsonar.javascript.lcov.reportPaths=front/coverage/microcrm/lcov.info

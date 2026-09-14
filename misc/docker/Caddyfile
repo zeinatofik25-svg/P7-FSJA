@@ -1,6 +1,28 @@
-* {
-	root * /app/front
-	encode gzip
-	try_files {path} /index.html
-	file_server
+{
+	log {
+		output stdout
+		format json
+	}
+}
+
+:80 {
+	log {
+		output stdout
+		format json
+	}
+
+	handle_path /api/* {
+		reverse_proxy back:8080
+	}
+
+	handle /health {
+		respond "ok" 200
+	}
+
+	handle {
+		root * /app/front
+		encode gzip
+		try_files {path} /index.html
+		file_server
+	}
 }

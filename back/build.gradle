@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'com.openclassroom.devops.orion'
-version = '0.0.1-SNAPSHOT'
+version = project.findProperty('appVersion') ?: '0.0.1-SNAPSHOT'
 
 java {
 	sourceCompatibility = '17'
@@ -20,6 +20,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-data-rest'
+	implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
 	implementation 'ro.polak:spring-boot-data-fixtures:0.2.0'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	runtimeOnly 'org.hsqldb:hsqldb'

@@ -1,0 +1,76 @@
+name: Continuous Deployment
+
+on:
+  workflow_run:
+    workflows:
+      - Continuous Integration
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish validated Docker images
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/microcrm-front
+            ghcr.io/${{ github.repository_owner }}/microcrm-back
+          tags: |
+            type=sha,prefix=,format=long
+            type=raw,value=main
+
+      - name: Build and publish frontend image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          target: front
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/microcrm-front:${{ github.event.workflow_run.head_sha }}
+            ghcr.io/${{ github.repository_owner }}/microcrm-front:main
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=microcrm-front
+          cache-to: type=gha,mode=max,scope=microcrm-front
+
+      - name: Build and publish backend image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          target: back
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/microcrm-back:${{ github.event.workflow_run.head_sha }}
+            ghcr.io/${{ github.repository_owner }}/microcrm-back:main
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=microcrm-back
+          cache-to: type=gha,mode=max,scope=microcrm-back

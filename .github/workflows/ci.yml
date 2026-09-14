@@ -217,7 +217,7 @@ jobs:
             -Dsonar.sources=back/src/main,front/src
             -Dsonar.tests=back/src/test,front/src
             -Dsonar.test.inclusions=back/src/test/**/*.java,front/src/**/*.spec.ts
-            -Dsonar.exclusions=back/src/test/**/*.java,front/src/**/*.spec.ts
+            -Dsonar.exclusions=back/src/test/**/*.java,front/src/**/*.spec.ts,front/src/**/*.png,front/src/**/*.ico,front/src/**/*.jpg
             -Dsonar.java.binaries=back/build/classes/java/main
             -Dsonar.java.test.binaries=back/build/classes/java/test
             -Dsonar.java.libraries=back/build/sonar-libraries/*.jar

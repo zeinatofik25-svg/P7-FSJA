@@ -36,14 +36,17 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build and test
-        run: ./gradlew build
+        run: ./gradlew build collectSonarLibraries
 
-      - name: Upload backend classes
+      - name: Upload backend analysis inputs
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: backend-classes
-          path: back/build/classes/java/main
+          path: |
+            back/build/classes/java/main
+            back/build/classes/java/test
+            back/build/sonar-libraries
           if-no-files-found: error
 
       - name: Upload backend reports
@@ -184,12 +187,12 @@ jobs:
         if: env.SONAR_TOKEN == ''
         run: echo "::warning::SONAR_TOKEN is not configured, skipping SonarQube analysis."
 
-      - name: Download backend classes
+      - name: Download backend analysis inputs
         if: env.SONAR_TOKEN != ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: backend-classes
-          path: back/build/classes/java/main
+          path: back/build
 
       - name: Download frontend coverage
         if: env.SONAR_TOKEN != ''
@@ -214,6 +217,9 @@ jobs:
             -Dsonar.sources=back/src/main,front/src
             -Dsonar.tests=back/src/test,front/src
             -Dsonar.test.inclusions=back/src/test/**/*.java,front/src/**/*.spec.ts
-            -Dsonar.exclusions=back/src/test/**/*.java,front/src/**/*.spec.ts
+            -Dsonar.exclusions=back/src/test/**/*.java,front/src/**/*.spec.ts,front/src/**/*.png,front/src/**/*.ico,front/src/**/*.jpg
             -Dsonar.java.binaries=back/build/classes/java/main
+            -Dsonar.java.test.binaries=back/build/classes/java/test
+            -Dsonar.java.libraries=back/build/sonar-libraries/*.jar
+            -Dsonar.java.test.libraries=back/build/sonar-libraries/*.jar
             -Dsonar.javascript.lcov.reportPaths=front/coverage/microcrm/lcov.info

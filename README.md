@@ -149,9 +149,11 @@ Après chaque déploiement sur `main`, relever le SHA, l'heure du commit, l'heur
 
 | SHA | Commit livré (UTC) | Fin CD (UTC) | Durée CI | Quality Gate | Incident / rollback | Retour au service (UTC) |
 | --- | --- | --- | --- | --- | --- | --- |
+| `f0e274c` | 2026-09-14 10:18:31 | 2026-09-14 11:13:01 | 2 min 26 s | OK | Non | Sans objet |
 | À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
 | À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
-| À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
+
+L'heure de commit retenue est la date d'auteur du commit applicatif (`af7d58e`), et non celle du commit de fusion : c'est le moment où le changement a été écrit, conformément à la définition du Lead Time. Le mode de fusion « merge commit » a été choisi pour cette raison, un squash réécrivant l'horodatage d'origine et ramenant artificiellement la métrique à quelques minutes.
 
 Pour Kibana, le panneau `Erreurs par service` utilise le filtre KQL `log_level: "ERROR"`. Le KPI de fréquence d'erreurs se calcule avec le même intervalle que le panneau de volume : $taux\ d'erreurs = \frac{nombre\ de\ logs\ ERROR}{nombre\ total\ de\ logs} \times 100$. Lors d'un pic de volume, comparer cette valeur avec la période précédente : un volume élevé sans hausse du taux d'erreurs correspond à une activité accrue, tandis qu'une hausse simultanée signale un risque de fiabilité.
 
@@ -245,10 +247,12 @@ Le workflow [`ci.yml`](.github/workflows/ci.yml) centralise l'intégration conti
 
 Les jobs s'exécutent comme suit :
 
-1. `backend` installe Java 17, utilise le Gradle Wrapper, exécute `./gradlew build` et conserve les rapports de tests ainsi que les classes compilées.
+1. `backend` installe Java 17, utilise le Gradle Wrapper, exécute `./gradlew build collectSonarLibraries` et conserve les rapports de tests, les classes compilées de production et de test ainsi que les dépendances du classpath.
 2. `frontend` installe Node.js 20 et Chrome, exécute `npm ci`, les tests Karma en mode `ChromeHeadlessNoSandbox`, puis `npm run build`. Les rapports de couverture et le dossier `dist` sont conservés.
 3. `security` exécute `npm audit --audit-level=high`, résout les dépendances Gradle et lance Trivy sur le dépôt pour détecter les vulnérabilités critiques/élevées et les secrets accidentellement présents.
-4. `sonar`, dépendant des deux builds, récupère les classes Java et la couverture frontend, puis soumet l'analyse à SonarQube Cloud. Le Quality Gate est vérifié séparément par le check GitHub **SonarCloud Code Analysis**, posté directement par l'application SonarCloud sur la pull request et le commit ; ce check doit être ajouté aux règles de protection de la branche `main` pour bloquer réellement une fusion en cas d'échec.
+4. `sonar`, dépendant des deux builds, récupère les classes Java, le classpath de compilation et la couverture frontend, puis soumet l'analyse à SonarQube Cloud. Le Quality Gate est vérifié séparément par le check GitHub **SonarCloud Code Analysis**, posté directement par l'application SonarCloud sur la pull request et le commit ; ce check doit être ajouté aux règles de protection de la branche `main` pour bloquer réellement une fusion en cas d'échec.
+
+La première analyse de `main` a produit trois avertissements SonarCloud signalant l'absence des propriétés `sonar.java.libraries`, `sonar.java.test.binaries` et `sonar.java.test.libraries`. Sans le classpath, l'analyseur Java ne résout pas les types provenant des dépendances et dégrade silencieusement la détection : les règles liées à Spring, à JPA ou aux API tierces ne peuvent pas s'appliquer. La tâche Gradle `collectSonarLibraries` copie donc les jars du `testRuntimeClasspath` dans `back/build/sonar-libraries`, publiés comme artefact et transmis au scanner. Un résultat d'analyse sans avertissement est la condition pour que les métriques Java soient comparables d'une livraison à l'autre.
 
 #### Configuration GitHub requise
 

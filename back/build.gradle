@@ -18,7 +18,6 @@ repositories {
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'org.springframework.boot:spring-boot-starter-data-rest'
 	implementation 'net.logstash.logback:logstash-logback-encoder:8.0'
 	implementation 'ro.polak:spring-boot-data-fixtures:0.2.0'
@@ -29,4 +28,10 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+// SonarCloud resout les types Java depuis les jars du classpath, absents du depot.
+tasks.register('collectSonarLibraries', Copy) {
+	from configurations.testRuntimeClasspath
+	into layout.buildDirectory.dir('sonar-libraries')
 }

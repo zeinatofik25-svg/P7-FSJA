@@ -198,6 +198,34 @@ Le pipeline limite effectivement les changements risqués : tests backend et fro
 
 **La supervision détecte vite, la restauration est lente.** Le délai de détection de 5,1 secondes montre que la chaîne gelf vers Logstash puis Elasticsearch est opérationnelle et que les logs d'accès Caddy suffisent à repérer une indisponibilité backend. En revanche 97 % du MTTR est consommé par le redémarrage applicatif. Le levier d'amélioration est donc le temps de démarrage du backend, mesuré entre 41 et 102 secondes selon la charge de la machine, et non l'outillage d'observabilité.
 
+#### Anomalies détectées par le monitoring et l'analyse
+
+Les anomalies suivantes ont été mises en évidence par les journaux, les agrégations Elasticsearch et les journaux du scanner SonarQube. Aucune n'était visible dans l'interface applicative : toutes proviennent de l'observation de la chaîne elle-même.
+
+| # | Anomalie | Source de détection | Preuve chiffrée | Traitement |
+| --- | --- | --- | --- | --- |
+| A1 | Le backend était compté comme **deux services distincts** | Agrégation `terms` sur `service_name.keyword` | `microcrm-back` 56, `p7-fsja-back-1` 14, `p7-fsja-front-1` 27 documents | Reprise du `tag` du driver `gelf` comme valeur de repli dans Logstash |
+| A2 | Les niveaux de log étaient **répartis sur quatre compartiments** au lieu de deux | Même agrégation, sur `log_level.keyword` | `INFO` 54, `info` 24, `WARN` 2, `warn` 3 | Normalisation en majuscules dans le filtre Logstash |
+| A3 | **14 documents sans aucun niveau** de log | Écart entre le total indexé et la somme des compartiments | 97 documents indexés pour 83 ventilés | Niveau déduit de la sévérité syslog transmise par `gelf` |
+| A4 | **Aucun journal d'accès HTTP** n'était produit par le frontend | Absence du champ `application_log.status` dans l'index | 0 document avec un code HTTP avant correction, 33 après | Ajout de la directive `log` dans le bloc de site du `Caddyfile` |
+| A5 | **226 lignes Java entièrement hors du périmètre** d'analyse qualité | Journal du scanner SonarQube | `Missing 'sonar.java.libraries'`, `Unresolved imports/types`, et `java` absent de `ncloc_language_distribution` | Publication du classpath Gradle comme artefact de CI |
+| A6 | **Démarrage applicatif anormalement long**, proche du seuil d'échec | Journal applicatif du conteneur backend | `Started MicroCRMApplication in 101.653 seconds` pour un budget de healthcheck de 140 s | Consigné comme risque R3 ; `start_period` à porter à 60 s |
+
+A1, A2 et A4 avaient le même effet : rendre le tableau de bord trompeur. Un panneau « Erreurs par service » construit avant correction aurait affiché des noms de conteneurs Docker, dédoublé chaque niveau de log et ignoré tout code HTTP. **Ces trois anomalies n'auraient produit aucune erreur visible** : le dashboard se serait affiché normalement, avec des chiffres faux. C'est l'argument central en faveur d'une vérification des champs indexés avant toute construction de visualisation.
+
+A5 illustre le même piège au niveau de la qualité : l'analyse réussissait, le Quality Gate était vert, et pourtant le langage principal du backend n'était pas analysé.
+
+#### Contrôle de non-régression sur les données personnelles
+
+Le plan de sécurité interdit la présence d'adresses e-mail, de téléphones ou de biographies dans les journaux. Ce contrôle a été exécuté sur l'index complet :
+
+```shell
+curl -s -XPOST "http://localhost:9200/microcrm-logs-*/_search" -H "Content-Type: application/json" \
+  -d '{"size":0,"query":{"query_string":{"query":"*@*.com OR *@*.fr","fields":["message"]}}}'
+```
+
+Résultat : **0 document**. L'encodeur Logback sérialise le contexte de journalisation, ce contrôle doit donc être rejoué après toute modification des messages de log ou ajout d'un champ au MDC. Une occurrence non nulle constitue un incident de sécurité à traiter immédiatement.
+
 #### Recommandations, par priorité
 
 | Priorité | Recommandation | Justification chiffrée |

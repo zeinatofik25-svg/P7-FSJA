@@ -31,17 +31,20 @@ Cette section définit les règles attendues avant la configuration technique de
 - **Backend** : `./gradlew test` exécute les tests JUnit 5 et les tests d'intégration Spring Boot avec HSQLDB. Ils vérifient notamment le contexte applicatif, les repositories et les comportements REST couverts par le projet.
 - **Frontend** : `npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox` exécute les tests unitaires Jasmine via Karma dans Chrome headless. Ils vérifient les composants, services et parcours Angular couverts par les spécifications existantes.
 - **Builds de validation** : `./gradlew build` et `npm run build` vérifient que le JAR et les fichiers statiques Angular sont produisibles avec les versions supportées.
-- **Validation intégration conteneurisée** : après construction, `docker compose config` vérifie la configuration Compose, puis le démarrage des services et leurs contrôles de santé vérifient que le front et l'API sont accessibles.
+- **Démarrage de l'artefact publié** : lors d'une release, le JAR construit est démarré et interrogé sur `/persons` jusqu'à obtenir une réponse, ce qui garantit qu'un livrable non exécutable ne peut pas être publié.
+- **Validation intégration conteneurisée** : `docker compose config` puis `docker compose up --no-build` suivis des contrôles de santé et des appels à `/health`, `/api/persons` et `/api/organizations`. Cette validation est exécutée **manuellement** par l'opérateur avant une mise en production ou après une restauration ; elle n'est pas automatisée en CI, le coût d'un démarrage complet de la pile étant disproportionné par rapport au rythme actuel de livraison.
 
 #### Déclenchement et objectifs
 
-| Moment | Contrôles | Objectif |
-| --- | --- | --- |
-| Chaque push sur une branche | Tests backend, tests frontend, builds et contrôle de qualité | Détecter immédiatement une régression introduite par le commit |
-| Chaque pull request vers `main` | Même socle complet, avec analyse SonarQube Cloud et contrôle des dépendances | Bloquer l'intégration d'un code non compilable, régressif ou ne respectant pas le niveau de qualité attendu |
-| Chaque nuit | Tests complets, scans de dépendances et construction des images Docker sans publication | Détecter une régression liée à une dépendance ou à l'environnement, même sans nouveau commit |
-| Chaque semaine | Test de démarrage Compose et test de restauration des artefacts sauvegardés | Vérifier la disponibilité de la chaîne de livraison et la récupérabilité des livrables |
-| Avant une mise en production | Tests de non-régression, contrôle SonarQube réussi et smoke test sur l'environnement cible | Réduire le risque fonctionnel et opérationnel de la livraison |
+| Moment | Contrôles | Déclencheur réel | Objectif |
+| --- | --- | --- | --- |
+| Chaque push sur une branche | Tests backend, tests frontend, builds, audit des dépendances et analyse SonarQube | `ci.yml`, `on: push` | Détecter immédiatement une régression introduite par le commit |
+| Chaque pull request vers `main` | Même socle complet, avec décoration de la pull request par SonarQube Cloud | `ci.yml`, `on: pull_request` | Bloquer l'intégration d'un code non compilable, régressif ou ne respectant pas le niveau de qualité attendu |
+| Chaque nuit à 02:30 UTC | Tests complets, audit `npm audit`, résolution des dépendances Gradle et scan Trivy du dépôt | `ci.yml`, `on: schedule` | Détecter une régression liée à une dépendance nouvellement signalée, même sans nouveau commit |
+| À chaque tag `vX.Y.Z` | Build versionné puis démarrage réel du JAR et appel à `/persons` | `release.yml`, `on: push tags` | Garantir que l'artefact publié est exécutable |
+| Avant une mise en production | Contrôle du Quality Gate, puis déploiement des images taguées par SHA et smoke test manuel sur l'environnement cible | Opérateur | Réduire le risque fonctionnel et opérationnel de la livraison |
+
+Le rythme de déclenchement est volontairement aligné sur ce que les workflows exécutent réellement. Un plan de testing qui annonce des contrôles inexistants donne une fausse assurance : il vaut mieux documenter une vérification manuelle assumée qu'une automatisation imaginaire.
 
 Les résultats, rapports de tests et couvertures doivent être conservés comme artefacts du workflow. Une pull request ne peut être fusionnée que si les tests obligatoires, le build et le Quality Gate SonarQube sont réussis. Les tests intermittents doivent être corrigés ou isolés rapidement ; un simple nouvel essai ne doit pas masquer une anomalie.
 
@@ -61,21 +64,21 @@ Les indicateurs surveillés sont :
 
 #### Résultats, analyse et priorités SonarQube
 
-Au moment de cette rédaction, aucun rapport SonarQube Cloud exporté ni aucune exécution analysée n'est disponible dans le dépôt. Il serait incorrect d'attribuer un nombre de vulnérabilités, de duplications ou un pourcentage de couverture à SonarQube sans cette preuve. Le tableau suivant constitue donc le backlog de revue prioritaire : les éléments marqués **constaté** ont été vérifiés dans le code ; les autres sont à qualifier avec la sévérité et la règle exacte proposées par SonarQube lors de la première analyse complète.
+Au moment de cette rédaction, trois analyses SonarQube Cloud ont été exécutées sur `main`. Les éléments marqués **constaté** ont été vérifiés dans le code ; les éléments marqués **mesuré** proviennent de l'analyse du commit `fa81dc4`. Le tableau suivant constitue le backlog de revue prioritaire.
 
 | Priorité | Domaine | Constat ou contrôle SonarQube à relever | Risque | Traitement attendu |
 | --- | --- | --- | --- | --- |
 | P1 | Exposition API | **Constaté** : les repositories Spring Data REST exposent lecture et écriture des personnes et organisations, sans mécanisme d'authentification applicatif visible | Modification ou consultation non autorisée de données personnelles | Ajouter une authentification et une autorisation par rôle avant tout déploiement public |
 | P1 | CORS | **Constaté** : la configuration autorise l'origine `*` sur toutes les routes | Une application tierce peut appeler l'API depuis le navigateur d'un utilisateur | Limiter les origines aux URL de l'interface selon l'environnement ; interdire toute origine non attendue |
 | P1 | Données personnelles | **Constaté** : `Person` contient e-mail, téléphone et biographie | Exposition de données personnelles par l'API ou les logs | Minimiser les champs exposés, documenter la conservation et ne jamais journaliser les objets `Person` complets |
-| P1 | Vulnérabilités | Relever les vulnérabilités et Security Hotspots Java/TypeScript ouvertes | Exploitation d'une faiblesse identifiée par SonarQube | Corriger immédiatement les vulnérabilités critiques et hautes ; examiner chaque Security Hotspot avant fusion |
+| P1 | Vulnérabilités | **Mesuré** : 4 vulnérabilités ouvertes, 0 Security Hotspot, note de sécurité C | Exploitation d'une faiblesse identifiée par SonarQube | Corriger immédiatement les vulnérabilités critiques et hautes ; examiner chaque Security Hotspot avant fusion |
 | P1 | Dépendances | Relever les alertes des dépendances directes et transitives | Composant connu vulnérable | Mettre à jour de manière compatible ; contrôler aussi `npm audit` et le scan Trivy |
 | P2 | Validation des entrées | **Constaté** : aucun contrat DTO ni annotation de validation n'est visible sur l'entité `Person` | Données invalides, volumétrie non maîtrisée et erreurs applicatives | Introduire des DTO et les contraintes `@NotBlank`, `@Email`, longueurs maximales ; ajouter les tests 400 associés |
-| P2 | Couverture backend | Relever la couverture Java mesurée par JaCoCo et importée depuis `back/build/reports/jacoco/test/jacocoTestReport.xml` | Zones REST et erreurs non protégées par des tests | Compléter les tests des cas d'erreur et viser 80 % sur le nouveau code |
-| P2 | Couverture frontend | Relever la couverture LCOV importée depuis `front/coverage/microcrm/lcov.info` | Régression de composants/services Angular | Ajouter les tests d'erreur HTTP, de formulaire et de navigation ; viser 80 % sur le nouveau code |
-| P2 | Duplications | Relever le pourcentage de duplication global et sur le nouveau code, séparément pour Java et TypeScript | Corrections incohérentes et maintenance coûteuse | Extraire les méthodes/services communs uniquement lorsque SonarQube confirme une duplication significative |
+| P2 | Couverture backend | **Mesuré** : 56,4 % sur 226 lignes Java, via JaCoCo importé depuis `back/build/reports/jacoco/test/jacocoTestReport.xml` | Zones REST et erreurs non protégées par des tests | Compléter les tests des cas d'erreur et viser 80 % sur le nouveau code |
+| P2 | Couverture frontend | **Mesuré** : 27,3 % sur 735 lignes TypeScript, dont 26,7 % sur `person-details` | Régression de composants/services Angular | Ajouter les tests d'erreur HTTP, de formulaire et de navigation ; viser 80 % sur le nouveau code |
+| P2 | Duplications | **Mesuré** : 2,5 % sur l'ensemble du code, 0 % sur le nouveau code | Corrections incohérentes et maintenance coûteuse | Extraire les méthodes/services communs uniquement lorsque SonarQube confirme une duplication significative |
 | P2 | Complexité | Trier les méthodes et composants par complexité cognitive et nombre de branches | Défauts difficiles à détecter et tester | Découper les méthodes au-dessus du seuil du Quality Profile, avec tests de non-régression |
-| P2 | Fiabilité | Relever bugs, exceptions non traitées et code mort signalés | Erreurs de production ou dette technique | Corriger les bugs bloquants avant fusion ; planifier les code smells dans le sprint suivant |
+| P2 | Fiabilité | **Mesuré** : 9 bugs ouverts, note de fiabilité C, 30 code smells pour 104 minutes de dette | Erreurs de production ou dette technique | Corriger les bugs bloquants avant fusion ; planifier les code smells dans le sprint suivant |
 | P3 | Maintenabilité | Relever code smells, dette estimée et règles de style | Lisibilité réduite et coût de changement | Traiter les alertes sur le nouveau code ; ne pas entreprendre de refactoring massif sans besoin métier |
 
 Les éléments P1 constituent des risques de sécurité ou de confidentialité ; ils ne doivent pas être assimilés aux code smells P3. Les duplications et la complexité sont principalement des indicateurs de maintenabilité et deviennent des risques de fiabilité lorsqu'ils empêchent de tester ou de corriger le code avec confiance.
@@ -84,16 +87,19 @@ Les éléments P1 constituent des risques de sécurité ou de confidentialité ;
 
 Le Quality Gate appliqué aux pull requests et à `main` doit exiger : aucune nouvelle vulnérabilité ni nouveau bug bloquant, aucune Security Hotspot non examinée, une couverture d'au moins 80 % sur le nouveau code et un taux de duplication inférieur à 3 % sur le nouveau code. La première analyse doit être archivée dans la documentation de sprint avec : date, branche/SHA, statut du Quality Gate, nombre de bugs, vulnérabilités, Security Hotspots, code smells, duplications, complexité et couverture, séparés par langage lorsque SonarQube les fournit.
 
-| Relevé SonarQube | Valeur à compléter après analyse | Décision |
+| Relevé SonarQube | Valeur sur `main` au 14 septembre 2026 | Décision |
 | --- | --- | --- |
-| Quality Gate | À compléter | Échec : fusion bloquée |
-| Vulnérabilités ouvertes | À compléter | Toute criticité haute ou critique : correction prioritaire |
-| Security Hotspots examinées | À compléter | 100 % requis avant livraison |
-| Bugs | À compléter | Bloquant/critique : correction avant fusion |
-| Duplications nouveau code | À compléter | Supérieur à 3 % : justification ou refactoring ciblé |
-| Complexité des méthodes prioritaires | À compléter | Découpage et tests lorsque le seuil du profil est dépassé |
-| Couverture nouveau code Java | À compléter | Inférieure à 80 % : ajouter les tests et le rapport JaCoCo |
-| Couverture nouveau code TypeScript | À compléter | Inférieure à 80 % : ajouter les tests Jasmine/Karma |
+| Quality Gate | **OK** | Échec : fusion bloquée |
+| Vulnérabilités ouvertes | **4**, note de sécurité C | Toute criticité haute ou critique : correction prioritaire |
+| Security Hotspots examinées | **100 %** (aucun hotspot détecté) | 100 % requis avant livraison |
+| Bugs | **9**, note de fiabilité C | Bloquant/critique : correction avant fusion |
+| Duplications nouveau code | **0 %** (2,5 % sur l'ensemble du code) | Supérieur à 3 % : justification ou refactoring ciblé |
+| Complexité des méthodes prioritaires | Complexité cognitive **19**, cyclomatique **92** pour 973 lignes | Découpage et tests lorsque le seuil du profil est dépassé |
+| Couverture Java | **56,4 %** (226 lignes) | Inférieure à 80 % : compléter les tests des cas d'erreur REST |
+| Couverture TypeScript | **27,3 %** (735 lignes) | Inférieure à 80 % : ajouter les tests Jasmine/Karma |
+| Avertissements d'analyse | **0** | Tout avertissement fausse la comparaison entre livraisons |
+
+Ce relevé correspond à l'analyse du commit `fa81dc4`, exécutée le 14 septembre 2026 à 20:21:43 UTC. Les notes de fiabilité et de sécurité à C portent exclusivement sur du code hérité : aucune des trois pull requests livrées n'a introduit de bug, de vulnérabilité ni de code smell.
 
 #### Croisement SonarQube, CI et ELK
 
@@ -121,27 +127,46 @@ Les alertes SonarQube, Dependabot et les scans de dépendances sont triés à ch
 
 Les métriques DORA permettent de mesurer séparément la vitesse de livraison et la fiabilité. Elles sont calculées sur une période glissante de 30 jours et révisées à chaque sprint. Les sources CI/CD sont l'historique GitHub Actions et GitHub Deployments ; les sources applicatives sont les index `microcrm-logs-*` dans Kibana. Une métrique n'est pas calculée à partir d'une estimation : les trois premières livraisons et les éventuels incidents doivent être consignés avant d'établir une valeur de référence.
 
-#### Tableau provisoire DORA
+#### Tableau DORA relevé le 14 septembre 2026
 
-| Métrique DORA | Méthode de calcul | Source | Valeur initiale | Cible après 3 sprints |
+Les valeurs ci-dessous proviennent de trois déploiements réellement exécutés sur `main` le 14 septembre 2026 et d'un incident provoqué volontairement en environnement local. Elles constituent la première référence du projet et non une valeur cible ; la période d'observation reste d'une seule journée.
+
+| Métrique DORA | Méthode de calcul | Source | Valeur mesurée | Cible après 3 sprints |
 | --- | --- | --- | --- | --- |
-| Lead Time for Changes | Médiane entre l'heure du commit livré sur `main` et la fin du workflow CD associé au même SHA | GitHub commits et fin du workflow `Continuous Deployment` | Non mesurable : aucune livraison CD historisée dans le dépôt local | Moins de 1 jour ouvré |
-| Deployment Frequency | Nombre de déploiements CD réussis sur `main` / 7 jours | Workflows `Continuous Deployment` réussis | Non mesurable : aucune exécution CD disponible | Au moins 1 déploiement par semaine |
-| Mean Time to Restore (MTTR) | Moyenne entre le début d'un incident horodaté et le retour à un contrôle de santé réussi | Incident, logs Kibana, horodatage du rollback ou du correctif déployé | Non mesurable : aucun incident consigné | Moins de 4 heures |
-| Change Failure Rate | (Déploiements ayant causé incident, rollback ou hotfix urgent / déploiements totaux) x 100 | GitHub Deployments, incidents et tickets | Non mesurable : aucune livraison CD disponible | Inférieur à 15 % |
+| Lead Time for Changes | Médiane entre la date d'auteur du commit livré sur `main` et la fin du workflow CD associé au même SHA | `git log` et `actions/runs/<id>/timing` | **16 min 05 s** (54 min 30 s / 13 min 05 s / 16 min 05 s) | Moins de 1 jour ouvré |
+| Deployment Frequency | Nombre de déploiements CD réussis sur `main` / période | Workflows `Continuous Deployment` réussis | **3 déploiements en 1 journée** | Au moins 1 déploiement par semaine |
+| Mean Time to Restore (MTTR) | Écart entre le début de l'incident horodaté et la première requête à nouveau servie | Horodatage de l'arrêt, logs Kibana, logs du conteneur | **2 min 02 s** (1 incident simulé) | Moins de 4 heures |
+| Change Failure Rate | (Déploiements ayant causé incident, rollback ou hotfix urgent / déploiements totaux) x 100 | Workflows CD et journal d'incidents | **0 %** (0 sur 3) | Inférieur à 15 % |
+
+Le Lead Time du premier déploiement (54 min 30 s) inclut le délai de revue humaine de la pull request ; les deux suivants, sans attente de revue, tombent à 13 et 16 minutes. La médiane est retenue plutôt que la moyenne précisément pour que cette attente ponctuelle ne masque pas la performance réelle de la chaîne automatisée, dont la part incompressible est de 4 à 5 minutes (CI puis CD).
+
+Le MTTR provient d'un incident **simulé** : arrêt volontaire du conteneur backend, détection par les logs, puis redémarrage. Il mesure la capacité de détection et de restauration de la chaîne, pas la résolution d'une panne réelle dont la cause serait inconnue. À ce titre il ne compte pas comme un échec de changement : le Change Failure Rate reste à 0 %, aucun des trois déploiements n'ayant provoqué de régression.
 
 Le taux d'échec ne doit compter qu'un déploiement une seule fois, même s'il produit plusieurs erreurs. Un échec de CI avant déploiement reste un signal de qualité, mais ne constitue pas un échec de changement DORA. De la même manière, une erreur isolée dans Kibana n'est un incident que si elle dégrade le service ou exige une intervention.
 
+#### Chronologie de l'incident simulé
+
+| Jalon | Horodatage UTC | Écart depuis T1 |
+| --- | --- | --- |
+| T1 — arrêt du backend (`docker compose stop back`) | 21:07:22,554 | — |
+| T2 — détection : premier document `log_level: ERROR` avec `application_log.status: 502` | 21:07:27,695 | 5,1 s |
+| Redémarrage du conteneur | 21:08:31,122 | 68,6 s |
+| T3 — première requête à nouveau servie | 21:09:24,212 | **121,7 s** |
+
+La détection en 5 secondes est le bénéfice direct des logs d'accès Caddy : l'échec du `reverse_proxy` produit immédiatement un événement `ERROR` exploitable. L'essentiel du MTTR est en revanche consommé par le redémarrage applicatif, le backend mettant ici 41 secondes à répondre après le lancement de la JVM. Réduire ce MTTR passe donc par l'accélération du démarrage, non par l'amélioration de la supervision.
+
 #### KPIs complémentaires
 
-| KPI | Méthode de calcul | Source | Cible opérationnelle | Action si seuil dépassé |
-| --- | --- | --- | --- | --- |
-| Durée CI | Médiane de la durée totale des 3 derniers workflows `Continuous Integration` réussis | GitHub Actions | Moins de 15 min | Identifier l'étape lente et exploiter le cache Gradle/npm |
-| Taux de réussite CI | (Workflows CI réussis / workflows CI terminés) x 100 sur 30 jours | GitHub Actions | Au moins 95 % | Corriger ou isoler le test instable avant nouveau merge |
-| Durée des tests | Durée médiane des étapes `Build and test` et `Run unit tests with coverage` | Logs GitHub Actions | Backend moins de 5 min, frontend moins de 8 min | Réduire les tests redondants ou améliorer le cache |
-| Couverture de tests | Couverture du nouveau code mesurée par SonarQube ; couverture globale suivie à titre indicatif | SonarQube Cloud et `front/coverage` | Au moins 80 % sur le nouveau code | Ajouter des tests avant validation de la pull request |
-| Qualité SonarQube | Quality Gate réussi, avec 0 vulnérabilité et 0 bug bloquant sur le nouveau code | SonarQube Cloud | 100 % des Quality Gates réussis | Bloquer la fusion et corriger les alertes |
-| Fréquence d'erreurs applicatives | Nombre de logs `ERROR` / nombre total de logs sur 15 min, ventilé par `service_name` | Kibana, index `microcrm-logs-*` | Inférieur à 1 % | Investiguer les erreurs répétées et créer un incident si le service est impacté |
+| KPI | Méthode de calcul | Source | Valeur mesurée | Cible opérationnelle | Action si seuil dépassé |
+| --- | --- | --- | --- | --- | --- |
+| Durée CI | Médiane de la durée totale des 3 derniers workflows `Continuous Integration` réussis sur `main` | GitHub Actions | **2 min 17 s** (2:26 / 2:11 / 2:17) | Moins de 15 min | Identifier l'étape lente et exploiter le cache Gradle/npm |
+| Taux de réussite CI | (Workflows CI réussis / workflows CI terminés) x 100 | GitHub Actions | **100 %** sur les 3 livraisons ; 42 % sur l'historique complet de 26 runs | Au moins 95 % | Corriger ou isoler le test instable avant nouveau merge |
+| Durée des tests | Durée des étapes `Build and test` et `Run unit tests with coverage` | Logs GitHub Actions | Backend **36 à 41 s**, frontend **12 à 15 s** | Backend moins de 5 min, frontend moins de 8 min | Réduire les tests redondants ou améliorer le cache |
+| Couverture de tests | Couverture mesurée par SonarQube, JaCoCo pour Java et LCOV pour TypeScript | SonarQube Cloud | **37,6 %** global : backend 56,4 %, frontend 27,3 % | Au moins 80 % sur le nouveau code | Ajouter des tests avant validation de la pull request |
+| Qualité SonarQube | Quality Gate réussi, sans avertissement d'analyse | SonarQube Cloud | **3 Quality Gates sur 3 réussis**, 0 avertissement d'analyse | 100 % des Quality Gates réussis | Bloquer la fusion et corriger les alertes |
+| Fréquence d'erreurs applicatives | Nombre de logs `ERROR` / nombre total de logs, ventilé par `service_name` | Kibana, index `microcrm-logs-*` | **5,36 %** sur la fenêtre de 20 min contenant l'incident (12 sur 224) ; **0 %** hors incident | Inférieur à 1 % | Investiguer les erreurs répétées et créer un incident si le service est impacté |
+| Délai de détection | Écart entre le début de la panne et le premier log `ERROR` indexé | Kibana | **5,1 s** | Moins de 1 min | Vérifier la chaîne gelf → Logstash → Elasticsearch |
+| Taille des images publiées | Taille locale après `docker pull` du tag SHA | GHCR | Backend **558 Mo**, frontend **70 Mo** | Backend moins de 400 Mo | Passer à une image de base `alpine` ou à un JRE réduit via `jlink` |
 
 #### Procédure de relève
 
@@ -151,17 +176,70 @@ Après chaque déploiement sur `main`, relever le SHA, l'heure du commit, l'heur
 | --- | --- | --- | --- | --- | --- | --- |
 | `f0e274c` | 2026-09-14 10:18:31 | 2026-09-14 11:13:01 | 2 min 26 s | OK | Non | Sans objet |
 | `7533d6d` | 2026-09-14 19:17:33 | 2026-09-14 19:30:38 | 2 min 11 s | OK | Non | Sans objet |
-| À compléter | À compléter | À compléter | À compléter | À compléter | Non / Oui | Sans objet / À compléter |
+| `fa81dc4` | 2026-09-14 20:08:04 | 2026-09-14 20:24:09 | 2 min 17 s | OK | Non (incident simulé hors déploiement à 21:07:22) | 2026-09-14 21:09:24 |
 
 L'heure de commit retenue est la date d'auteur du commit applicatif (`af7d58e`), et non celle du commit de fusion : c'est le moment où le changement a été écrit, conformément à la définition du Lead Time. Le mode de fusion « merge commit » a été choisi pour cette raison, un squash réécrivant l'horodatage d'origine et ramenant artificiellement la métrique à quelques minutes.
 
 Pour Kibana, le panneau `Erreurs par service` utilise le filtre KQL `log_level: "ERROR"`. Le KPI de fréquence d'erreurs se calcule avec le même intervalle que le panneau de volume : $taux\ d'erreurs = \frac{nombre\ de\ logs\ ERROR}{nombre\ total\ de\ logs} \times 100$. Lors d'un pic de volume, comparer cette valeur avec la période précédente : un volume élevé sans hausse du taux d'erreurs correspond à une activité accrue, tandis qu'une hausse simultanée signale un risque de fiabilité.
 
-#### Analyse initiale et recommandations
+#### Analyse commentée
 
-Le pipeline est conçu pour limiter les changements risqués : tests backend et frontend, audit des dépendances, recherche de secrets et Quality Gate SonarQube précèdent la publication. Le workflow CD est déclenché seulement pour une CI réussie provenant d'un push sur `main`, ce qui assure la traçabilité du SHA livré. En revanche, aucune exécution CI/CD et aucun incident de production ne sont disponibles dans les données locales ; les quatre métriques DORA ne peuvent donc pas être chiffrées de manière fiable à ce stade.
+Le pipeline limite effectivement les changements risqués : tests backend et frontend, audit des dépendances, recherche de secrets et analyse SonarQube précèdent toute publication, et le workflow CD n'est déclenché que par une CI réussie provenant d'un push sur `main`. Les trois livraisons du 14 septembre 2026 confirment que cette chaîne fonctionne de bout en bout : trois Quality Gates réussis, aucun échec de déploiement, et des images publiées avec un tag SHA immuable vérifiable dans GHCR.
 
-La priorité du prochain sprint est de réaliser au moins trois livraisons sur `main`, de compléter le tableau de relève pour chacune et d'enregistrer les incidents avec heures de début et de résolution. L'équipe pourra alors remplacer les valeurs provisoires par les médianes et moyennes observées. Les tableaux Kibana complètent ces métriques en révélant les pics de charge et la fréquence des erreurs après livraison ; ils ne remplacent pas l'horodatage des déploiements ni la déclaration d'incident nécessaires au calcul DORA.
+**La chaîne automatisée n'est pas le facteur limitant.** La part incompressible entre un commit et une image déployable est de 4 à 5 minutes, dont 2 min 17 s de CI. L'écart entre le premier Lead Time (54 min 30 s) et les suivants (13 et 16 minutes) provient entièrement de l'attente de revue humaine. Optimiser la CI n'améliorerait donc pas significativement le Lead Time ; réduire le délai de prise en charge des pull requests, si.
+
+**Le coût du CD a chuté de 68 % entre la première et la deuxième publication**, de 5 min 21 s à 1 min 42 s, grâce au cache Buildx sur GitHub Actions. La première exécution paie la construction complète des deux images ; les suivantes ne reconstruisent que les couches modifiées. Cette valeur ne doit donc pas être comparée d'un sprint à l'autre sans vérifier l'état du cache.
+
+**Le taux de réussite CI de 42 % sur l'historique complet n'est pas un indicateur de fiabilité du produit.** Les quinze échecs sont concentrés entre le 27 août et le 10 septembre, pendant la mise au point du pipeline lui-même : versions d'actions inexistantes, permissions SonarCloud, attente bloquante du Quality Gate. Aucun ne correspond à une régression applicative. Sur les trois livraisons mesurées, le taux est de 100 %. La valeur de référence doit donc être recalculée sur une fenêtre glissante démarrant après stabilisation, et l'exclusion doit être documentée plutôt que silencieuse.
+
+**Une amélioration d'outillage peut dégrader les indicateurs qualité.** La correction des trois avertissements d'analyse a fait apparaître 226 lignes Java jusque-là totalement absentes du périmètre SonarQube, et avec elles 5 issues et 3 vulnérabilités supplémentaires. Une lecture naïve conclurait à une régression ; il s'agit en réalité de la fin d'un angle mort. Toute comparaison de métriques SonarQube entre deux livraisons doit donc vérifier d'abord que le périmètre analysé est identique.
+
+**Le Quality Gate vert ne certifie pas un code sain.** Il ne porte que sur le nouveau code, or les trois pull requests n'ont introduit aucune ligne de production. Les 9 bugs, 4 vulnérabilités et 30 code smells du code hérité restent donc invisibles pour ce contrôle, avec des notes de fiabilité et de sécurité à C. C'est une limite structurelle du Quality Gate, pas un défaut de configuration : le backlog de revue prioritaire reste le seul mécanisme qui traite ce stock.
+
+**La supervision détecte vite, la restauration est lente.** Le délai de détection de 5,1 secondes montre que la chaîne gelf vers Logstash puis Elasticsearch est opérationnelle et que les logs d'accès Caddy suffisent à repérer une indisponibilité backend. En revanche 97 % du MTTR est consommé par le redémarrage applicatif. Le levier d'amélioration est donc le temps de démarrage du backend, mesuré entre 41 et 102 secondes selon la charge de la machine, et non l'outillage d'observabilité.
+
+#### Anomalies détectées par le monitoring et l'analyse
+
+Les anomalies suivantes ont été mises en évidence par les journaux, les agrégations Elasticsearch et les journaux du scanner SonarQube. Aucune n'était visible dans l'interface applicative : toutes proviennent de l'observation de la chaîne elle-même.
+
+| # | Anomalie | Source de détection | Preuve chiffrée | Traitement |
+| --- | --- | --- | --- | --- |
+| A1 | Le backend était compté comme **deux services distincts** | Agrégation `terms` sur `service_name.keyword` | `microcrm-back` 56, `p7-fsja-back-1` 14, `p7-fsja-front-1` 27 documents | Reprise du `tag` du driver `gelf` comme valeur de repli dans Logstash |
+| A2 | Les niveaux de log étaient **répartis sur quatre compartiments** au lieu de deux | Même agrégation, sur `log_level.keyword` | `INFO` 54, `info` 24, `WARN` 2, `warn` 3 | Normalisation en majuscules dans le filtre Logstash |
+| A3 | **14 documents sans aucun niveau** de log | Écart entre le total indexé et la somme des compartiments | 97 documents indexés pour 83 ventilés | Niveau déduit de la sévérité syslog transmise par `gelf` |
+| A4 | **Aucun journal d'accès HTTP** n'était produit par le frontend | Absence du champ `application_log.status` dans l'index | 0 document avec un code HTTP avant correction, 33 après | Ajout de la directive `log` dans le bloc de site du `Caddyfile` |
+| A5 | **226 lignes Java entièrement hors du périmètre** d'analyse qualité | Journal du scanner SonarQube | `Missing 'sonar.java.libraries'`, `Unresolved imports/types`, et `java` absent de `ncloc_language_distribution` | Publication du classpath Gradle comme artefact de CI |
+| A6 | **Démarrage applicatif anormalement long**, proche du seuil d'échec | Journal applicatif du conteneur backend | `Started MicroCRMApplication in 101.653 seconds` pour un budget de healthcheck de 140 s | Consigné comme risque R3 ; `start_period` à porter à 60 s |
+
+A1, A2 et A4 avaient le même effet : rendre le tableau de bord trompeur. Un panneau « Erreurs par service » construit avant correction aurait affiché des noms de conteneurs Docker, dédoublé chaque niveau de log et ignoré tout code HTTP. **Ces trois anomalies n'auraient produit aucune erreur visible** : le dashboard se serait affiché normalement, avec des chiffres faux. C'est l'argument central en faveur d'une vérification des champs indexés avant toute construction de visualisation.
+
+A5 illustre le même piège au niveau de la qualité : l'analyse réussissait, le Quality Gate était vert, et pourtant le langage principal du backend n'était pas analysé.
+
+#### Contrôle de non-régression sur les données personnelles
+
+Le plan de sécurité interdit la présence d'adresses e-mail, de téléphones ou de biographies dans les journaux. Ce contrôle a été exécuté sur l'index complet :
+
+```shell
+curl -s -XPOST "http://localhost:9200/microcrm-logs-*/_search" -H "Content-Type: application/json" \
+  -d '{"size":0,"query":{"query_string":{"query":"*@*.com OR *@*.fr","fields":["message"]}}}'
+```
+
+Résultat : **0 document**. L'encodeur Logback sérialise le contexte de journalisation, ce contrôle doit donc être rejoué après toute modification des messages de log ou ajout d'un champ au MDC. Une occurrence non nulle constitue un incident de sécurité à traiter immédiatement.
+
+#### Recommandations, par priorité
+
+| Priorité | Recommandation | Justification chiffrée |
+| --- | --- | --- |
+| 1 | Réduire le temps de démarrage du backend et porter `start_period` à 60 s dans le healthcheck | 97 % du MTTR de 2 min 02 s ; le budget actuel du healthcheck est de 140 s pour un démarrage observé jusqu'à 102 s |
+| 2 | Compléter les tests backend sur les cas d'erreur REST | Couverture backend 56,4 % contre une cible de 80 % ; seules 2 classes de test existent |
+| 3 | Traiter le stock de 9 bugs et 4 vulnérabilités du code hérité | Notes de fiabilité et de sécurité à C, invisibles pour le Quality Gate |
+| 4 | Compléter les tests frontend, en priorité `person-details` | Couverture 27,3 % globale, 26,7 % sur `person-details` pour 281 lignes |
+| 5 | Réduire l'image backend sous 400 Mo | 558 Mo contre 70 Mo pour le frontend ; coût de transfert à chaque déploiement |
+| 6 | Réduire le délai de prise en charge des pull requests | Seul poste significatif du Lead Time, 54 min 30 s contre 4 à 5 min automatisés |
+
+#### Limites du relevé
+
+Ces valeurs portent sur une seule journée, trois déploiements et un incident provoqué. Elles établissent une référence, pas une tendance. Trois conditions doivent être réunies avant d'en tirer des conclusions de performance : au moins trente jours d'historique, des déploiements portant du code applicatif et non seulement de l'outillage, et au moins un incident non simulé dont la cause était inconnue au départ. Le MTTR d'un incident simulé est structurellement optimiste, puisque la cause et le correctif sont connus avant même le début de la mesure.
 
 ### Principes de conteneurisation et de déploiement
 
@@ -232,14 +310,175 @@ En fonctionnement nominal, le backend ne journalise pas chaque requête : le vol
 
 Si aucun événement n'apparaît, vérifier dans cet ordre que Logstash écoute (`docker compose -f docker-compose-elk.yml logs logstash`), que les conteneurs MicroCRM ont été recréés après le démarrage d'ELK (`docker compose up -d --force-recreate`) et que Docker Desktop peut joindre `host.docker.internal`. Cette adresse est la passerelle de l'hôte fournie par Docker Desktop sous Windows et permet au driver de logs de joindre le port Logstash publié. Le monitoring local est volontairement exclu des workflows CI/CD en raison de son coût mémoire et de l'absence de besoin de rétention longue durée.
 
-#### Stratégie de déploiement
+### Plan de déploiement
 
-1. Un push sur `main` qui passe les tests, les scans et le Quality Gate construit les images `front` et `back`.
-2. Les images sont publiées dans GitHub Container Registry avec un tag immuable correspondant au SHA du commit. Un tag de version peut être ajouté pour faciliter l'exploitation, mais `latest` ne doit pas être utilisé comme référence de déploiement.
-3. Un environnement de recette déploie ces mêmes artefacts et exécute les smoke tests via Compose. La promotion vers la production réutilise les images déjà validées, sans recompilation.
-4. Le déploiement de production est protégé par un environnement GitHub avec approbation manuelle, secrets séparés et journalisation. En cas d'échec, le tag du dernier SHA validé est redéployé.
+#### Prérequis techniques
 
-Les sauvegardes concernent d'abord les artefacts, la configuration et les manifests. Une vraie sauvegarde applicative nécessitera une base persistante externe ; elle devra être ajoutée avant de considérer le service prêt pour une production avec conservation des données.
+| Prérequis | Valeur | Vérification |
+| --- | --- | --- |
+| Docker Engine avec Compose v2 | Testé avec Docker Desktop 4.87, Engine 29.7.2 | `docker compose version` |
+| Accès en lecture à GHCR | Compte disposant du droit `read:packages` | `docker login ghcr.io` |
+| Ports libres sur l'hôte | `80` pour le frontend, `8080` pour l'API | `docker compose config` |
+| Mémoire disponible | 2 Go pour l'application seule, 6 Go si la pile ELK tourne sur la même machine | `docker info` |
+| SHA validé à déployer | Tag d'image produit par un workflow CD réussi | Onglet **Actions**, workflow `Continuous Deployment` |
+
+Aucun secret n'est nécessaire au déploiement : l'application ne lit aucune variable d'environnement sensible et la base HSQLDB est embarquée.
+
+#### Ordre de déploiement
+
+L'ordre est imposé par deux dépendances techniques et ne peut pas être inversé :
+
+1. **La pile ELK d'abord**, si le monitoring est souhaité. Le driver `gelf` émet en UDP sans accusé de réception : tout conteneur démarré avant Logstash perd définitivement les logs produits entre les deux démarrages.
+2. **Le backend ensuite.** Le frontend déclare `depends_on: back: condition: service_healthy` ; Compose attend donc que le contrôle de santé du backend réussisse avant de démarrer Caddy.
+3. **Le frontend enfin**, qui expose le port 80 et relaie `/api` vers le backend sur le réseau interne.
+
+#### Procédure
+
+```shell
+docker login ghcr.io
+docker pull ghcr.io/<organisation-ou-utilisateur>/microcrm-front:<sha>
+docker pull ghcr.io/<organisation-ou-utilisateur>/microcrm-back:<sha>
+
+docker tag ghcr.io/<organisation-ou-utilisateur>/microcrm-front:<sha> orion-microcrm-front:local
+docker tag ghcr.io/<organisation-ou-utilisateur>/microcrm-back:<sha> orion-microcrm-back:local
+
+docker compose up -d --no-build --force-recreate
+docker compose ps
+```
+
+L'option `--no-build` est essentielle : elle garantit que l'artefact déployé est bien l'image testée par la CI, et non une recompilation locale qui pourrait diverger. Le déploiement est terminé lorsque les deux services affichent `healthy`, ce qui a demandé **75,6 secondes** lors du relevé du 14 septembre 2026.
+
+#### Vérification
+
+```shell
+curl -f http://localhost/health
+curl -f http://localhost/api/persons
+curl -f http://localhost:8080/persons
+```
+
+Les trois réponses doivent être en succès. En cas de monitoring actif, contrôler ensuite Kibana pendant 15 minutes avec le filtre `log_level: "ERROR"` : un taux d'erreurs supérieur à 1 % justifie un retour arrière.
+
+#### Risques de mise en production
+
+Les risques ci-dessous ont été identifiés à partir des incidents réellement rencontrés pendant la mise en place du pipeline et des relevés du 14 septembre 2026. Ils sont classés par gravité opérationnelle.
+
+| # | Risque | Déclencheur observé ou plausible | Détection | Parade |
+| --- | --- | --- | --- | --- |
+| R1 | **Perte totale des données applicatives** à chaque redéploiement | HSQLDB est en mémoire ; tout contenu saisi disparaît à l'arrêt du conteneur | Aucune : la perte est silencieuse et le jeu de fixtures masque le vide | Interdire toute exploitation avec données réelles tant qu'une base persistante externe n'est pas en place |
+| R2 | **Exposition publique de l'API sans authentification** | Les repositories Spring Data REST exposent lecture et écriture, et CORS autorise l'origine `*` | Aucune en l'état | Restreindre CORS et protéger les routes avant toute exposition hors poste local |
+| R3 | **Le frontend ne démarre jamais** parce que le backend n'atteint pas `healthy` | Démarrage backend mesuré entre 41 et 102 s pour un budget de healthcheck de 140 s ; sur une machine plus lente le seuil est franchi | `docker compose ps` reste bloqué sur `health: starting` | Porter `start_period` à 60 s, et vérifier le temps de démarrage après toute montée de version de Spring Boot |
+| R4 | **Déploiement non reproductible** | Utilisation du tag `main`, qui est mutable | Aucune : deux déploiements du même tag peuvent différer | N'utiliser que le tag SHA ; le tag `main` reste un confort de lecture |
+| R5 | **Publication d'une image qui ne démarre pas** | Le workflow CD publie sans jamais démarrer les images ; seul `release.yml` vérifie le démarrage du JAR | Découverte au déploiement | Exécuter [`misc/scripts/restore.sh`](misc/scripts/restore.sh) sur le SHA publié avant toute promotion |
+| R6 | **Perte silencieuse des logs, donc perte de la capacité de détection** | Le driver `gelf` émet en UDP sans accusé de réception ; tout conteneur démarré avant Logstash perd ses journaux | Absence de documents récents dans `microcrm-logs-*` | Respecter l'ordre de démarrage, et contrôler `_count` après chaque déploiement |
+| R7 | **Destruction accidentelle de l'autre pile** | Les deux fichiers Compose partagent le projet `p7-fsja` ; `docker compose down --remove-orphans` supprime les conteneurs de l'autre fichier | Avertissement `Found orphan containers` à chaque commande | Ne jamais employer `--remove-orphans`, ou isoler la pile ELK sous un nom de projet distinct |
+| R8 | **Indisponibilité de GHCR bloquant déploiement et restauration** | La procédure de déploiement comme le script de restauration dépendent du registre | Échec du `docker pull` | Conserver localement les images des deux derniers SHA validés |
+
+R1 et R2 sont des risques bloquants : ils interdisent en l'état toute mise en production avec des données réelles ou une exposition publique. Ce constat est assumé, MicroCRM étant une application de démonstration ; il doit être levé avant tout autre usage.
+
+#### Retour arrière
+
+Le rollback consiste à rejouer le déploiement avec le SHA précédemment validé, ce qu'automatise [`misc/scripts/restore.sh`](misc/scripts/restore.sh). Aucune migration de données n'étant appliquée, l'opération est symétrique et ne nécessite aucune restauration de base. Le tag `main` existe pour le confort d'exploitation mais **ne doit jamais servir de référence de déploiement** : il est mutable, donc non reproductible.
+
+#### Promotion vers la production
+
+Un push sur `main` qui passe les tests, les scans et le Quality Gate construit et publie les images `front` et `back` avec un tag SHA immuable. Un environnement de recette déploie ces mêmes artefacts et exécute les contrôles ci-dessus ; la promotion vers la production réutilise l'image déjà validée, sans recompilation. Le déploiement de production est protégé par un environnement GitHub avec approbation manuelle, secrets séparés et journalisation.
+
+### Plan de sauvegarde
+
+#### Ce qui est sauvegardé
+
+| Élément | Support | Fréquence | Méthode |
+| --- | --- | --- | --- |
+| Code source et historique | Dépôt GitHub `zeinatofik25-svg/P7-FSJA` | À chaque push | Réplication GitHub ; chaque poste de développement détient un clone complet |
+| Images applicatives | GitHub Container Registry, tag SHA immuable | À chaque déploiement | Publiées par le workflow CD, conservées sans expiration |
+| Configuration d'exécution | `docker-compose.yml`, `docker-compose-elk.yml`, `misc/docker/Caddyfile`, `elk/` | À chaque push | Versionnée dans le dépôt, donc couverte par la sauvegarde du code |
+| Définition du pipeline | `.github/workflows/` | À chaque push | Idem |
+| Rapports de tests et de couverture | Artefacts GitHub Actions | À chaque exécution CI | Rétention par défaut de 90 jours |
+| Artefacts de version | Releases GitHub (JAR et archive du build Angular) | À chaque tag `vX.Y.Z` | Attachés à la release, conservés sans expiration |
+| Secrets | Secrets GitHub Actions et variables d'environnement de l'hébergeur | À chaque modification | Jamais dans le dépôt ; restauration par ressaisie manuelle |
+
+#### Ce qui n'est pas sauvegardé, et pourquoi
+
+**Les données applicatives ne sont pas sauvegardées, parce qu'il n'y en a pas à conserver.** Le backend utilise HSQLDB en mémoire et recharge un jeu de fixtures à chaque démarrage : le contenu est perdu à l'arrêt du conteneur et reconstruit à l'identique au redémarrage. Prétendre sauvegarder cette base serait trompeur.
+
+Cette configuration convient à une démonstration mais **interdit toute mise en production avec conservation de données**. Le passage à une base persistante externe est le prérequis à un vrai plan de sauvegarde ; il devra alors définir une fréquence, une rétention, un chiffrement et surtout un test de restauration périodique, une sauvegarde jamais restaurée n'ayant aucune valeur démontrée.
+
+Les index Elasticsearch locaux ne sont pas sauvegardés non plus : le monitoring est un outil de poste de développement, sans besoin de rétention longue durée. Le volume `elasticsearch-data` survit à un `docker compose down` mais est détruit par l'option `-v`.
+
+#### Restauration automatisée
+
+La restauration ne repose pas sur une procédure manuelle à recopier : elle est automatisée par le script [`misc/scripts/restore.sh`](misc/scripts/restore.sh), qui prend en argument le SHA d'une version déjà publiée.
+
+```shell
+./misc/scripts/restore.sh <sha>
+```
+
+Le script enchaîne cinq opérations et s'interrompt en erreur dès que l'une échoue :
+
+1. récupération des deux images depuis GHCR pour le SHA demandé ;
+2. réétiquetage vers les noms attendus par Compose ;
+3. redéploiement par `docker compose up -d --no-build --force-recreate`, sans aucune recompilation ;
+4. attente des contrôles de santé des deux services, avec un délai maximal configurable par `HEALTH_TIMEOUT` ;
+5. smoke test sur `/health`, `/api/persons` et `/api/organizations`.
+
+Le code de sortie est significatif : `0` seulement si les deux services sont sains et si les trois appels répondent. En cas d'échec de santé, les cinquante dernières lignes de journal du service fautif sont affichées pour le diagnostic. L'organisation GHCR est surchargeable par la variable `GHCR_OWNER`, ce qui permet de rejouer la restauration depuis un miroir.
+
+Ce même script sert au rollback : redéployer le SHA précédemment validé et restaurer après incident sont exactement la même opération, puisque aucune migration de données n'est appliquée.
+
+**Résultat mesuré le 18 septembre 2026** : restauration complète de la version `fa81dc4` en **37 secondes**, images déjà présentes en cache local, avec les trois contrôles réussis. Ce délai est à comparer au MTTR de 2 min 02 s relevé lors de l'incident simulé : un rollback outillé est donc plus rapide qu'un simple redémarrage attendu passivement.
+
+Le test de restauration est à exécuter avant toute mise en production et après toute modification du `Dockerfile` ou de la configuration Compose. Une sauvegarde dont la restauration n'a jamais été exécutée n'a aucune valeur démontrée.
+
+### Plan de mise à jour
+
+#### Mise à jour de l'application
+
+Toute modification suit le même chemin, sans exception : branche, pull request vers `main`, CI complète, Quality Gate, puis publication automatique d'une image taguée par SHA. Le déploiement applique ensuite la procédure du plan de déploiement. Aucune modification ne doit être appliquée directement sur un environnement déployé, sous peine de rendre l'artefact non reproductible et le rollback imprévisible.
+
+Un correctif urgent sur une version déjà publiée se traite par une branche `hotfix/X.Y.Z` créée à partir du tag concerné, puis par une nouvelle release correctrice. Le dépôt reste en trunk-based : `main` est la seule branche durable.
+
+#### Mise à jour des dépendances
+
+| Périmètre | Outil de détection | Commande de mise à jour | Cadence |
+| --- | --- | --- | --- |
+| Dépendances npm | `npm audit` dans le job `security`, alertes Dependabot | `npm update` puis `npm ci` pour régénérer `package-lock.json` | Revue à chaque sprint |
+| Dépendances Gradle | `./gradlew dependencies`, scan Trivy, alertes Dependabot | Modification de `back/build.gradle` | Revue à chaque sprint |
+| Images de base Docker | Scan Trivy du système de fichiers, `docker scout cves` | Modification des `FROM` du `Dockerfile` | Revue mensuelle |
+| Actions GitHub | Alertes Dependabot | Mise à jour du SHA épinglé dans `.github/workflows/` | Revue mensuelle |
+| Pile ELK | Notes de version Elastic | Modification des tags dans `docker-compose-elk.yml` | Revue semestrielle |
+
+Les installations se font exclusivement à partir des fichiers verrouillés, `npm ci` et le Gradle Wrapper, afin que la CI, le poste de développement et l'image publiée résolvent strictement les mêmes versions.
+
+#### Règles de traitement
+
+Une vulnérabilité **critique sur une dépendance de production** interrompt la chaîne et bloque la publication. L'audit complet incluant les dépendances de développement s'exécute en mode rapport : les outils de build Angular portent des vulnérabilités connues qui ne sont pas livrées en production et dont la correction impose une montée de version majeure, planifiée séparément. Ce seuil différencié est un choix assumé, pas un contournement.
+
+Les mises à jour sont appliquées par lots cohérents et séparées des évolutions fonctionnelles, afin qu'une régression puisse être imputée sans ambiguïté. Une montée de version majeure de Java, Node.js, Spring Boot ou Angular fait l'objet d'une pull request dédiée, avec exécution complète des tests et contrôle du Quality Gate avant fusion.
+
+#### Vérification après mise à jour
+
+Une mise à jour n'est considérée comme réussie qu'après trois contrôles : CI verte incluant les tests backend et frontend, Quality Gate SonarQube réussi, et absence de hausse du taux d'erreurs dans Kibana pendant les 15 minutes suivant le déploiement. Les métriques DORA relevées après chaque livraison permettent de détecter une dégradation progressive de la chaîne, notamment un allongement du Lead Time ou une hausse du Change Failure Rate.
+
+#### Ajustement des processus
+
+Les seuils, cadences et procédures de ce document décrivent l'état du projet au 18 septembre 2026. Ils sont datés par construction et perdent leur pertinence à mesure que l'application et l'outillage évoluent. Les conserver sans révision produirait le défaut déjà constaté sur le plan de testing périodique, qui annonçait un contrôle hebdomadaire inexistant : une documentation rassurante et fausse.
+
+La revue est déclenchée par l'un de ces quatre événements, et non par le calendrier seul :
+
+| Déclencheur | Conséquence sur les processus |
+| --- | --- |
+| Montée de version majeure de Java, Node.js, Spring Boot ou Angular | Revalider les temps de démarrage et de build, donc les seuils du healthcheck et des KPI de durée |
+| Ajout d'une base de données persistante | Rend caduc le plan de sauvegarde actuel : il faudra définir fréquence, rétention, chiffrement et restauration des données, et lever le risque R1 |
+| Changement d'hébergement ou d'orchestrateur | Réécrire le plan de déploiement et le script de restauration, qui supposent aujourd'hui Docker Compose sur un hôte unique |
+| Dérive constatée d'une métrique sur deux relevés consécutifs | Analyser la cause avant de modifier le seuil, un seuil ajusté pour absorber une dérive masquant le problème qu'il devait signaler |
+
+Trois ajustements sont déjà identifiés comme nécessaires à court terme :
+
+- **Resserrer le seuil de durée CI.** La cible de 15 minutes face aux 2 min 17 s mesurées est si large qu'elle ne déclencherait jamais d'alerte, même si la CI triplait de durée. Elle doit être ramenée à une valeur proche du relevé une fois trente jours d'historique disponibles.
+- **Recalculer le taux de réussite CI sur une fenêtre glissante.** La valeur historique de 42 % agrège la période de mise au point du pipeline et n'a aucune signification opérationnelle.
+- **Resserrer le seuil d'audit des dépendances de développement.** La tolérance actuelle est justifiée par les vulnérabilités connues de la chaîne de build Angular ; elle devra disparaître après la montée de version majeure qui les corrige.
+
+Le principe directeur est qu'un indicateur qui ne déclenche jamais d'action doit être supprimé ou son seuil resserré. Un tableau de bord dont tous les voyants sont verts en permanence ne surveille rien.
 
 ### Mise en œuvre de la CI GitHub Actions
 

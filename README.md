@@ -360,9 +360,29 @@ Cette configuration convient à une démonstration mais **interdit toute mise en
 
 Les index Elasticsearch locaux ne sont pas sauvegardés non plus : le monitoring est un outil de poste de développement, sans besoin de rétention longue durée. Le volume `elasticsearch-data` survit à un `docker compose down` mais est détruit par l'option `-v`.
 
-#### Test de restauration
+#### Restauration automatisée
 
-La restauration de la chaîne de livraison se vérifie en redéployant un SHA antérieur avec la procédure du plan de déploiement, puis en contrôlant les trois points de vérification. Ce test est à exécuter une fois par semaine, conformément au plan de testing périodique.
+La restauration ne repose pas sur une procédure manuelle à recopier : elle est automatisée par le script [`misc/scripts/restore.sh`](misc/scripts/restore.sh), qui prend en argument le SHA d'une version déjà publiée.
+
+```shell
+./misc/scripts/restore.sh <sha>
+```
+
+Le script enchaîne cinq opérations et s'interrompt en erreur dès que l'une échoue :
+
+1. récupération des deux images depuis GHCR pour le SHA demandé ;
+2. réétiquetage vers les noms attendus par Compose ;
+3. redéploiement par `docker compose up -d --no-build --force-recreate`, sans aucune recompilation ;
+4. attente des contrôles de santé des deux services, avec un délai maximal configurable par `HEALTH_TIMEOUT` ;
+5. smoke test sur `/health`, `/api/persons` et `/api/organizations`.
+
+Le code de sortie est significatif : `0` seulement si les deux services sont sains et si les trois appels répondent. En cas d'échec de santé, les cinquante dernières lignes de journal du service fautif sont affichées pour le diagnostic. L'organisation GHCR est surchargeable par la variable `GHCR_OWNER`, ce qui permet de rejouer la restauration depuis un miroir.
+
+Ce même script sert au rollback : redéployer le SHA précédemment validé et restaurer après incident sont exactement la même opération, puisque aucune migration de données n'est appliquée.
+
+**Résultat mesuré le 18 septembre 2026** : restauration complète de la version `fa81dc4` en **37 secondes**, images déjà présentes en cache local, avec les trois contrôles réussis. Ce délai est à comparer au MTTR de 2 min 02 s relevé lors de l'incident simulé : un rollback outillé est donc plus rapide qu'un simple redémarrage attendu passivement.
+
+Le test de restauration est à exécuter avant toute mise en production et après toute modification du `Dockerfile` ou de la configuration Compose. Une sauvegarde dont la restauration n'a jamais été exécutée n'a aucune valeur démontrée.
 
 ### Plan de mise à jour
 

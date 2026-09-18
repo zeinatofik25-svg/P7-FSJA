@@ -330,9 +330,26 @@ curl -f http://localhost:8080/persons
 
 Les trois réponses doivent être en succès. En cas de monitoring actif, contrôler ensuite Kibana pendant 15 minutes avec le filtre `log_level: "ERROR"` : un taux d'erreurs supérieur à 1 % justifie un retour arrière.
 
+#### Risques de mise en production
+
+Les risques ci-dessous ont été identifiés à partir des incidents réellement rencontrés pendant la mise en place du pipeline et des relevés du 14 septembre 2026. Ils sont classés par gravité opérationnelle.
+
+| # | Risque | Déclencheur observé ou plausible | Détection | Parade |
+| --- | --- | --- | --- | --- |
+| R1 | **Perte totale des données applicatives** à chaque redéploiement | HSQLDB est en mémoire ; tout contenu saisi disparaît à l'arrêt du conteneur | Aucune : la perte est silencieuse et le jeu de fixtures masque le vide | Interdire toute exploitation avec données réelles tant qu'une base persistante externe n'est pas en place |
+| R2 | **Exposition publique de l'API sans authentification** | Les repositories Spring Data REST exposent lecture et écriture, et CORS autorise l'origine `*` | Aucune en l'état | Restreindre CORS et protéger les routes avant toute exposition hors poste local |
+| R3 | **Le frontend ne démarre jamais** parce que le backend n'atteint pas `healthy` | Démarrage backend mesuré entre 41 et 102 s pour un budget de healthcheck de 140 s ; sur une machine plus lente le seuil est franchi | `docker compose ps` reste bloqué sur `health: starting` | Porter `start_period` à 60 s, et vérifier le temps de démarrage après toute montée de version de Spring Boot |
+| R4 | **Déploiement non reproductible** | Utilisation du tag `main`, qui est mutable | Aucune : deux déploiements du même tag peuvent différer | N'utiliser que le tag SHA ; le tag `main` reste un confort de lecture |
+| R5 | **Publication d'une image qui ne démarre pas** | Le workflow CD publie sans jamais démarrer les images ; seul `release.yml` vérifie le démarrage du JAR | Découverte au déploiement | Exécuter [`misc/scripts/restore.sh`](misc/scripts/restore.sh) sur le SHA publié avant toute promotion |
+| R6 | **Perte silencieuse des logs, donc perte de la capacité de détection** | Le driver `gelf` émet en UDP sans accusé de réception ; tout conteneur démarré avant Logstash perd ses journaux | Absence de documents récents dans `microcrm-logs-*` | Respecter l'ordre de démarrage, et contrôler `_count` après chaque déploiement |
+| R7 | **Destruction accidentelle de l'autre pile** | Les deux fichiers Compose partagent le projet `p7-fsja` ; `docker compose down --remove-orphans` supprime les conteneurs de l'autre fichier | Avertissement `Found orphan containers` à chaque commande | Ne jamais employer `--remove-orphans`, ou isoler la pile ELK sous un nom de projet distinct |
+| R8 | **Indisponibilité de GHCR bloquant déploiement et restauration** | La procédure de déploiement comme le script de restauration dépendent du registre | Échec du `docker pull` | Conserver localement les images des deux derniers SHA validés |
+
+R1 et R2 sont des risques bloquants : ils interdisent en l'état toute mise en production avec des données réelles ou une exposition publique. Ce constat est assumé, MicroCRM étant une application de démonstration ; il doit être levé avant tout autre usage.
+
 #### Retour arrière
 
-Le rollback consiste à rejouer la même procédure avec le SHA précédemment validé. Aucune migration de données n'étant appliquée, l'opération est symétrique et ne nécessite aucune restauration. Le tag `main` existe pour le confort d'exploitation mais **ne doit jamais servir de référence de déploiement** : il est mutable, donc non reproductible.
+Le rollback consiste à rejouer le déploiement avec le SHA précédemment validé, ce qu'automatise [`misc/scripts/restore.sh`](misc/scripts/restore.sh). Aucune migration de données n'étant appliquée, l'opération est symétrique et ne nécessite aucune restauration de base. Le tag `main` existe pour le confort d'exploitation mais **ne doit jamais servir de référence de déploiement** : il est mutable, donc non reproductible.
 
 #### Promotion vers la production
 

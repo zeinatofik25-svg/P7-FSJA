@@ -459,6 +459,27 @@ Les mises à jour sont appliquées par lots cohérents et séparées des évolut
 
 Une mise à jour n'est considérée comme réussie qu'après trois contrôles : CI verte incluant les tests backend et frontend, Quality Gate SonarQube réussi, et absence de hausse du taux d'erreurs dans Kibana pendant les 15 minutes suivant le déploiement. Les métriques DORA relevées après chaque livraison permettent de détecter une dégradation progressive de la chaîne, notamment un allongement du Lead Time ou une hausse du Change Failure Rate.
 
+#### Ajustement des processus
+
+Les seuils, cadences et procédures de ce document décrivent l'état du projet au 18 septembre 2026. Ils sont datés par construction et perdent leur pertinence à mesure que l'application et l'outillage évoluent. Les conserver sans révision produirait le défaut déjà constaté sur le plan de testing périodique, qui annonçait un contrôle hebdomadaire inexistant : une documentation rassurante et fausse.
+
+La revue est déclenchée par l'un de ces quatre événements, et non par le calendrier seul :
+
+| Déclencheur | Conséquence sur les processus |
+| --- | --- |
+| Montée de version majeure de Java, Node.js, Spring Boot ou Angular | Revalider les temps de démarrage et de build, donc les seuils du healthcheck et des KPI de durée |
+| Ajout d'une base de données persistante | Rend caduc le plan de sauvegarde actuel : il faudra définir fréquence, rétention, chiffrement et restauration des données, et lever le risque R1 |
+| Changement d'hébergement ou d'orchestrateur | Réécrire le plan de déploiement et le script de restauration, qui supposent aujourd'hui Docker Compose sur un hôte unique |
+| Dérive constatée d'une métrique sur deux relevés consécutifs | Analyser la cause avant de modifier le seuil, un seuil ajusté pour absorber une dérive masquant le problème qu'il devait signaler |
+
+Trois ajustements sont déjà identifiés comme nécessaires à court terme :
+
+- **Resserrer le seuil de durée CI.** La cible de 15 minutes face aux 2 min 17 s mesurées est si large qu'elle ne déclencherait jamais d'alerte, même si la CI triplait de durée. Elle doit être ramenée à une valeur proche du relevé une fois trente jours d'historique disponibles.
+- **Recalculer le taux de réussite CI sur une fenêtre glissante.** La valeur historique de 42 % agrège la période de mise au point du pipeline et n'a aucune signification opérationnelle.
+- **Resserrer le seuil d'audit des dépendances de développement.** La tolérance actuelle est justifiée par les vulnérabilités connues de la chaîne de build Angular ; elle devra disparaître après la montée de version majeure qui les corrige.
+
+Le principe directeur est qu'un indicateur qui ne déclenche jamais d'action doit être supprimé ou son seuil resserré. Un tableau de bord dont tous les voyants sont verts en permanence ne surveille rien.
+
 ### Mise en œuvre de la CI GitHub Actions
 
 Le workflow [`ci.yml`](.github/workflows/ci.yml) centralise l'intégration continue. Il est déclenché sur chaque push, sur les pull requests vers `main`, chaque nuit à 02:30 UTC et manuellement depuis l'onglet **Actions** de GitHub.

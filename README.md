@@ -31,17 +31,20 @@ Cette section définit les règles attendues avant la configuration technique de
 - **Backend** : `./gradlew test` exécute les tests JUnit 5 et les tests d'intégration Spring Boot avec HSQLDB. Ils vérifient notamment le contexte applicatif, les repositories et les comportements REST couverts par le projet.
 - **Frontend** : `npm test -- --watch=false --browsers=ChromeHeadlessNoSandbox` exécute les tests unitaires Jasmine via Karma dans Chrome headless. Ils vérifient les composants, services et parcours Angular couverts par les spécifications existantes.
 - **Builds de validation** : `./gradlew build` et `npm run build` vérifient que le JAR et les fichiers statiques Angular sont produisibles avec les versions supportées.
-- **Validation intégration conteneurisée** : après construction, `docker compose config` vérifie la configuration Compose, puis le démarrage des services et leurs contrôles de santé vérifient que le front et l'API sont accessibles.
+- **Démarrage de l'artefact publié** : lors d'une release, le JAR construit est démarré et interrogé sur `/persons` jusqu'à obtenir une réponse, ce qui garantit qu'un livrable non exécutable ne peut pas être publié.
+- **Validation intégration conteneurisée** : `docker compose config` puis `docker compose up --no-build` suivis des contrôles de santé et des appels à `/health`, `/api/persons` et `/api/organizations`. Cette validation est exécutée **manuellement** par l'opérateur avant une mise en production ou après une restauration ; elle n'est pas automatisée en CI, le coût d'un démarrage complet de la pile étant disproportionné par rapport au rythme actuel de livraison.
 
 #### Déclenchement et objectifs
 
-| Moment | Contrôles | Objectif |
-| --- | --- | --- |
-| Chaque push sur une branche | Tests backend, tests frontend, builds et contrôle de qualité | Détecter immédiatement une régression introduite par le commit |
-| Chaque pull request vers `main` | Même socle complet, avec analyse SonarQube Cloud et contrôle des dépendances | Bloquer l'intégration d'un code non compilable, régressif ou ne respectant pas le niveau de qualité attendu |
-| Chaque nuit | Tests complets, scans de dépendances et construction des images Docker sans publication | Détecter une régression liée à une dépendance ou à l'environnement, même sans nouveau commit |
-| Chaque semaine | Test de démarrage Compose et test de restauration des artefacts sauvegardés | Vérifier la disponibilité de la chaîne de livraison et la récupérabilité des livrables |
-| Avant une mise en production | Tests de non-régression, contrôle SonarQube réussi et smoke test sur l'environnement cible | Réduire le risque fonctionnel et opérationnel de la livraison |
+| Moment | Contrôles | Déclencheur réel | Objectif |
+| --- | --- | --- | --- |
+| Chaque push sur une branche | Tests backend, tests frontend, builds, audit des dépendances et analyse SonarQube | `ci.yml`, `on: push` | Détecter immédiatement une régression introduite par le commit |
+| Chaque pull request vers `main` | Même socle complet, avec décoration de la pull request par SonarQube Cloud | `ci.yml`, `on: pull_request` | Bloquer l'intégration d'un code non compilable, régressif ou ne respectant pas le niveau de qualité attendu |
+| Chaque nuit à 02:30 UTC | Tests complets, audit `npm audit`, résolution des dépendances Gradle et scan Trivy du dépôt | `ci.yml`, `on: schedule` | Détecter une régression liée à une dépendance nouvellement signalée, même sans nouveau commit |
+| À chaque tag `vX.Y.Z` | Build versionné puis démarrage réel du JAR et appel à `/persons` | `release.yml`, `on: push tags` | Garantir que l'artefact publié est exécutable |
+| Avant une mise en production | Contrôle du Quality Gate, puis déploiement des images taguées par SHA et smoke test manuel sur l'environnement cible | Opérateur | Réduire le risque fonctionnel et opérationnel de la livraison |
+
+Le rythme de déclenchement est volontairement aligné sur ce que les workflows exécutent réellement. Un plan de testing qui annonce des contrôles inexistants donne une fausse assurance : il vaut mieux documenter une vérification manuelle assumée qu'une automatisation imaginaire.
 
 Les résultats, rapports de tests et couvertures doivent être conservés comme artefacts du workflow. Une pull request ne peut être fusionnée que si les tests obligatoires, le build et le Quality Gate SonarQube sont réussis. Les tests intermittents doivent être corrigés ou isolés rapidement ; un simple nouvel essai ne doit pas masquer une anomalie.
 

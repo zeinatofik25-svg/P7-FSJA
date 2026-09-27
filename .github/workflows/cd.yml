@@ -74,3 +74,33 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=microcrm-back
           cache-to: type=gha,mode=max,scope=microcrm-back
+
+      # Le scan "fs" de la CI ne voit pas les paquets systeme des images de base,
+      # qui n'existent qu'une fois l'image construite.
+      - name: Scan published frontend image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        continue-on-error: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/microcrm-front:${{ github.event.workflow_run.head_sha }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Scan published backend image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        continue-on-error: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository_owner }}/microcrm-back:${{ github.event.workflow_run.head_sha }}
+          scanners: vuln
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'

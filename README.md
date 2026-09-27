@@ -11,7 +11,7 @@
 | **Auteur** | Zeina AKOUM |
 | **Option choisie** | Option B — Scénario Orion |
 | **Dépôt** | [zeinatofik25-svg/P7-FSJA](https://github.com/zeinatofik25-svg/P7-FSJA) |
-| **Version documentée** | Commit `31f2363`, mesures relevées entre le 14 et le 26 septembre 2026 |
+| **Périmètre documenté** | La totalité de la chaîne livrée sur la branche `main` : workflows, Dockerfiles, conteneurisation, monitoring, plans et métriques. Mesures relevées entre le 14 et le 26 septembre 2026 |
 | **Date** | 26 septembre 2026 |
 
 ---
@@ -98,7 +98,7 @@ Les trois premiers jobs tournent **en parallèle** ; `sonar` attend les deux bui
 
 [`cd.yml`](.github/workflows/cd.yml) se déclenche sur l'événement `workflow_run`, à la fin de la CI. Il ne publie qu'à quatre conditions réunies : CI réussie, événement `push`, branche `main`, dépôt d'origine correct.
 
-Il récupère alors le SHA exact validé par la CI, s'authentifie à GHCR avec le `GITHUB_TOKEN`, construit les étapes `front` et `back` avec Buildx, puis publie les deux images sous un tag SHA immuable et le tag de confort `main`.
+Il récupère alors le SHA exact validé par la CI, s'authentifie à GHCR avec le `GITHUB_TOKEN`, construit les étapes `front` et `back` avec Buildx, puis publie les deux images sous un tag SHA immuable et le tag de confort `main`. Les deux images publiées sont ensuite scannées par Trivy, en mode rapport : le scan du système de fichiers exécuté en CI ne voit pas les paquets système apportés par les images de base, qui n'existent qu'une fois l'image construite.
 
 ![Exécution du workflow Continuous Deployment](./misc/screenshots/cd-run-first.png)
 
@@ -126,7 +126,7 @@ Le projet suit [SemVer](https://semver.org/lang/fr/) : **MAJOR** pour une ruptur
 | `actions/setup-java` | JDK Temurin 17 | Version imposée par `sourceCompatibility` ; le cache Gradle est activé |
 | `actions/setup-node` | Node.js 20 | Requis par Angular 17 ; cache npm indexé sur `front/package-lock.json` |
 | `browser-actions/setup-chrome` | Chrome headless | Karma exige un navigateur réel ; évite d'installer Chrome à la main dans le runner |
-| `aquasecurity/trivy-action` | Scan secrets et vulnérabilités | Un seul outil couvre la recherche de secrets et le scan du système de fichiers |
+| `aquasecurity/trivy-action` | Scan secrets, système de fichiers et images | Un seul outil couvre les trois besoins : secrets commités et dépendances en CI, paquets système des images publiées en CD |
 | `SonarSource/sonarqube-scan-action` | Analyse qualité | Scanner officiel ; le Quality Gate est posté par l'application SonarCloud comme check GitHub |
 | `docker/build-push-action` + `setup-buildx-action` | Construction et publication | Cache `type=gha` : le CD est passé de 5 min 21 s à 1 min 42 s entre la première et la deuxième publication |
 | `actions/upload-artifact` / `download-artifact` | Transfert entre jobs | Évite de recompiler le backend dans le job `sonar` |
@@ -156,8 +156,6 @@ L'effet de la correction se lit directement sur la couverture.
 ![Couverture SonarCloud après l'ajout de JaCoCo](./misc/screenshots/coverage-after-jacoco.png)
 
 *Figure 6 — **Après.** Couverture globale 37,6 %, `back/src` à **56,4 %**, sans qu'aucun test n'ait été ajouté. Seule la chaîne de mesure a été corrigée.*
-
-Pour un autre registre, surcharger `GHCR_OWNER` ; pour un démarrage plus lent, `HEALTH_TIMEOUT` (300 s par défaut).
 
 ### 2.3 Reproductibilité
 
@@ -282,7 +280,7 @@ curl -f http://localhost/api/persons
 curl -f http://localhost:8080/persons
 ```
 
-Les trois réponses doivent être en succès. Contrôler ensuite Kibana pendant 15 minutes avec `log_level: "ERROR"` : au-delà de 1 % d'erreurs, revenir en arrière. Avant promotion, les images peuvent être scannées avec `docker scout cves`.
+Les trois réponses doivent être en succès. Contrôler ensuite Kibana pendant 15 minutes avec `log_level: "ERROR"` : au-delà de 1 % d'erreurs, revenir en arrière. Le rapport Trivy du SHA déployé est consultable dans les journaux du workflow `Continuous Deployment`, étape `Scan published images`.
 
 #### Risques de mise en production
 
@@ -411,7 +409,7 @@ Après chaque livraison, surveiller Kibana 15 minutes avec `service_name: "micro
 - Le token `SONAR_TOKEN`, les identifiants du registre et toute configuration sensible sont stockés dans les secrets GitHub ou dans les variables d'environnement de l'environnement de déploiement. Ils ne sont jamais écrits dans le dépôt, les Dockerfiles ou les journaux.
 - Les dépendances sont installées à partir des fichiers verrouillés (`npm ci` et Gradle Wrapper). La chaîne échoue en cas de vulnérabilité **critique sur une dépendance de production** (`npm audit --omit=dev --audit-level=critical`) ou de **secret détecté** dans le dépôt. L'audit complet, incluant les dépendances de développement, et le scan de vulnérabilités du système de fichiers sont exécutés en mode rapport : ils n'interrompent pas la chaîne mais doivent être triés à chaque sprint. Ce seuil différencié est un choix assumé : les outils de build Angular actuels portent des vulnérabilités connues qui ne sont pas livrées en production et dont la correction impose une montée de version majeure, planifiée séparément.
 - Les actions GitHub et les images de base sont maintenues à jour et référencées par un SHA explicite. Les permissions du workflow sont limitées au principe du moindre privilège et les publications sont interdites depuis une pull request.
-- Les images sont construites en plusieurs étapes, ne contiennent ni outils de build ni secrets, et exécutent les services avec un utilisateur non privilégié lorsque les images utilisées le permettent.
+- Les images sont construites en plusieurs étapes, ne contiennent ni outils de build ni secrets, et exécutent les services avec un utilisateur non privilégié lorsque les images utilisées le permettent. Chaque image publiée est scannée par Trivy dans le workflow de déploiement, en mode rapport : un blocage à ce stade n'empêcherait pas la publication, déjà effectuée, mais le rapport conditionne la promotion vers un environnement cible.
 - Les entrées reçues par l'API sont validées, les erreurs ne révèlent pas de détails internes et les journaux ne contiennent pas de données personnelles. Les règles OWASP applicables aux API REST et aux applications web Angular sont vérifiées lors de chaque revue.
 
 Les alertes SonarQube, Dependabot et les scans de dépendances sont triés à chaque sprint. Une vulnérabilité critique fait l'objet d'un traitement prioritaire et peut déclencher une mise en pause des publications.
@@ -740,7 +738,7 @@ Un correctif urgent sur une version publiée passe par une branche `hotfix/X.Y.Z
 | --- | --- | --- | --- |
 | Dépendances npm | `npm audit` dans le job `security`, alertes Dependabot | `npm update` puis `npm ci` pour régénérer `package-lock.json` | Revue à chaque sprint |
 | Dépendances Gradle | `./gradlew dependencies`, scan Trivy, alertes Dependabot | Modification de `back/build.gradle` | Revue à chaque sprint |
-| Images de base Docker | Scan Trivy du système de fichiers, `docker scout cves` | Modification des `FROM` du `Dockerfile` | Revue mensuelle |
+| Images de base Docker | Scan Trivy de l'image publiée dans le workflow de déploiement | Modification des `FROM` du `Dockerfile` | Revue mensuelle |
 | Actions GitHub | Alertes Dependabot | Mise à jour du SHA épinglé dans `.github/workflows/` | Revue mensuelle |
 | Pile ELK | Notes de version Elastic | Modification des tags dans `docker-compose-elk.yml` | Revue semestrielle |
 
@@ -806,7 +804,7 @@ Le projet est passé d'un dépôt sans automatisation à une chaîne complète, 
 | Qualité | Aucune analyse | SonarQube Cloud, Quality Gate bloquant, **0 avertissement d'analyse** |
 | Couverture | Non mesurée | 37,6 % global, dont 56,4 % backend via JaCoCo |
 | Périmètre analysé | **Java totalement absent** | 226 lignes Java analysées, 5 issues révélées |
-| Sécurité | Aucun contrôle | `npm audit`, Trivy secrets bloquant, actions épinglées par SHA |
+| Sécurité | Aucun contrôle | `npm audit`, Trivy secrets bloquant, scan des images publiées, actions épinglées par SHA |
 | Observabilité | Sortie standard uniquement | Pile ELK, journaux JSON normalisés, tableau de bord à 3 panneaux |
 | Restauration | Aucune procédure | Script automatisé, testé, **37 secondes mesurées** |
 | Pilotage | Aucune métrique | 4 métriques DORA et 8 KPI relevés sur 4 déploiements réels |

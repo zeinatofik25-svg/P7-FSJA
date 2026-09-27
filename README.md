@@ -112,6 +112,8 @@ Il récupère alors le SHA exact validé par la CI, s'authentifie à GHCR avec l
 
 [`release.yml`](.github/workflows/release.yml) se déclenche sur un tag `vX.Y.Z`. Il valide le format SemVer, construit le backend avec `-PappVersion=<version>` et le frontend, **démarre réellement le JAR produit** et interroge `/persons` jusqu'à réponse, puis publie la release avec le JAR et l'archive `microcrm-front-<version>.zip`. Un tag suffixé comme `v0.1.0-rc.1` devient automatiquement une pré-release.
 
+La version **1.0.0** a été publiée le 27 septembre 2026 depuis le tag annoté `v1.0.0` posé sur le commit `01f1c8d` : workflow exécuté en **1 min 43 s**, toutes les étapes en succès, démarrage du JAR vérifié avant publication. La release porte `microcrm-1.0.0.jar` (46 Mo) et `microcrm-front-1.0.0.zip` (100 Ko).
+
 Le projet suit [SemVer](https://semver.org/lang/fr/) : **MAJOR** pour une rupture de l'API REST, **MINOR** pour un ajout rétrocompatible, **PATCH** pour une correction. Trois décisions encadrent cette politique :
 
 - **Pas de release par commit.** Chaque commit sur `main` produit déjà une image taguée par SHA, testée et analysée : c'est le livrable de l'intégration continue. Une release par commit n'ajouterait rien et rendrait l'historique illisible.
@@ -393,12 +395,15 @@ Les éléments **constatés** ont été vérifiés dans le code, les éléments 
 | P1 | CORS | **Constaté** : l'origine `*` est autorisée sur toutes les routes | Une application tierce peut appeler l'API depuis le navigateur d'un utilisateur |
 | P1 | Données personnelles | **Constaté** : `Person` contient e-mail, téléphone et biographie | Exposition par l'API ou par les journaux |
 | P1 | Vulnérabilités | **Mesuré** : 4 vulnérabilités, 0 Security Hotspot, note de sécurité C | Exploitation d'une faiblesse identifiée |
+| P1 | Images publiées | **Mesuré** le 27 septembre 2026 : 7 CRITICAL et 27 HIGH sur l'image backend, 7 CRITICAL et 80 HIGH sur l'image frontend, toutes corrigeables et héritées des images de base | Exploitation d'un paquet système vulnérable dans le conteneur livré |
 | P2 | Validation des entrées | **Constaté** : aucun DTO ni annotation de validation sur `Person` | Données invalides, volumétrie non maîtrisée |
 | P2 | Couverture | **Mesuré** : backend 56,4 %, frontend 27,3 %, dont 26,7 % sur `person-details` | Cas d'erreur REST et composants non protégés |
 | P2 | Fiabilité | **Mesuré** : 9 bugs, 30 code smells, 104 minutes de dette | Erreurs de production, coût de maintenance |
 | P3 | Maintenabilité | **Mesuré** : duplication 2,5 % globale et 0 % sur le nouveau code, complexité cognitive 19 | Lisibilité réduite, refactoring risqué |
 
 Les P1 sont des risques de sécurité ou de confidentialité et **ne doivent pas être assimilés aux code smells P3**. Duplication et complexité relèvent de la maintenabilité ; elles ne deviennent des risques de fiabilité que lorsqu'elles empêchent de tester ou de corriger avec confiance.
+
+Le scan d'images a été ajouté au workflow de déploiement le 27 septembre 2026 et a révélé dès sa première exécution ce que le scan du système de fichiers ne pouvait pas voir : **121 vulnérabilités HIGH ou CRITICAL corrigeables dans les images livrées**, alors que la CI n'en signalait aucune. Les deux scans ne sont pas redondants — l'un lit les fichiers du dépôt, l'autre les paquets réellement présents dans le conteneur, qui n'existent qu'une fois l'image construite. Le volume frontend s'explique par le binaire Caddy embarqué, celui du backend par la base Ubuntu 22.04 et ses 143 paquets système.
 
 #### Croisement SonarQube, CI et journaux applicatifs
 
@@ -435,6 +440,7 @@ Les alertes SonarQube, Dependabot et les scans de dépendances sont triés à ch
 | Compléter les tests backend sur les cas d'erreur REST pour atteindre 80 % | P2 Couverture backend | À faire, 56,4 % actuellement |
 | Compléter les tests frontend, en priorité `person-details` | P2 Couverture frontend | À faire, 27,3 % actuellement |
 | Porter `start_period` du healthcheck backend à 60 s | R3 | À faire |
+| Monter les images de base `caddy:2.8-alpine` et `eclipse-temurin:17-jre-jammy`, puis passer le scan d'image en mode bloquant sur CRITICAL | P1 Images publiées | À faire, scan en mode rapport depuis le 27 septembre 2026 |
 | Traiter les 9 bugs et 4 vulnérabilités du code hérité | P1 Vulnérabilités, P2 Fiabilité | À faire |
 
 #### Actions à long terme
@@ -623,8 +629,9 @@ Les anomalies suivantes proviennent des journaux, des agrégations Elasticsearch
 | A4 | **Aucun journal d'accès HTTP** côté frontend | Absence du champ `application_log.status` | 0 document avec un code HTTP avant, 33 après | Directive `log` dans le bloc de site du `Caddyfile` |
 | A5 | **226 lignes Java hors du périmètre** d'analyse | Journal du scanner SonarQube | `Missing 'sonar.java.libraries'`, `java` absent de `ncloc_language_distribution` | Classpath Gradle publié comme artefact |
 | A6 | **Démarrage anormalement long**, proche du seuil d'échec | Journal du conteneur backend | `Started MicroCRMApplication in 101.653 seconds` pour un budget de 140 s | Consigné en R3 ; `start_period` à 60 s |
+| A7 | **121 vulnérabilités HIGH ou CRITICAL invisibles** dans les images livrées | Scan Trivy `image` ajouté au workflow de déploiement | 0 signalée par le scan `fs` de la CI, 87 sur l'image frontend et 34 sur l'image backend | Scan d'image en mode rapport ; montée des images de base planifiée |
 
-A1, A2 et A4 partagent une propriété décisive : **aucune ne produisait d'erreur**. Un panneau « Erreurs par service » construit avant correction aurait affiché des noms de conteneurs Docker, dédoublé chaque niveau et ignoré tout code HTTP — en s'affichant parfaitement normalement, avec des chiffres faux. C'est l'argument central en faveur d'une vérification des champs indexés **avant** de construire la moindre visualisation. A5 est le même piège côté qualité : analyse réussie, Quality Gate vert, langage principal non analysé.
+A1, A2 et A4 partagent une propriété décisive : **aucune ne produisait d'erreur**. Un panneau « Erreurs par service » construit avant correction aurait affiché des noms de conteneurs Docker, dédoublé chaque niveau et ignoré tout code HTTP — en s'affichant parfaitement normalement, avec des chiffres faux. C'est l'argument central en faveur d'une vérification des champs indexés **avant** de construire la moindre visualisation. A5 est le même piège côté qualité : analyse réussie, Quality Gate vert, langage principal non analysé. A7 en est la version sécurité : chaîne verte, aucun signalement, et pourtant 121 vulnérabilités corrigeables dans les images effectivement livrées.
 
 #### Contrôle des données personnelles
 
@@ -642,11 +649,12 @@ Résultat : **0 document**. L'encodeur Logback sérialisant le contexte de journ
 | Priorité | Recommandation | Justification chiffrée |
 | --- | --- | --- |
 | 1 | Réduire le temps de démarrage du backend et porter `start_period` à 60 s dans le healthcheck | 97 % du MTTR de 2 min 02 s ; le budget actuel du healthcheck est de 140 s pour un démarrage observé jusqu'à 102 s |
-| 2 | Compléter les tests backend sur les cas d'erreur REST | Couverture backend 56,4 % contre une cible de 80 % ; seules 2 classes de test existent |
-| 3 | Traiter le stock de 9 bugs et 4 vulnérabilités du code hérité | Notes de fiabilité et de sécurité à C, invisibles pour le Quality Gate |
-| 4 | Compléter les tests frontend, en priorité `person-details` | Couverture 27,3 % globale, 26,7 % sur `person-details` pour 281 lignes |
-| 5 | Réduire l'image backend sous 400 Mo | 558 Mo contre 70 Mo pour le frontend ; coût de transfert à chaque déploiement |
-| 6 | Réduire le délai de prise en charge des pull requests | Seul poste significatif du Lead Time, 54 min 30 s contre 4 à 5 min automatisés |
+| 2 | Monter les images de base et passer le scan d'image en mode bloquant sur CRITICAL | 121 vulnérabilités HIGH ou CRITICAL corrigeables dans les images livrées, dont 14 CRITICAL, invisibles pour le scan du système de fichiers |
+| 3 | Compléter les tests backend sur les cas d'erreur REST | Couverture backend 56,4 % contre une cible de 80 % ; seules 2 classes de test existent |
+| 4 | Traiter le stock de 9 bugs et 4 vulnérabilités du code hérité | Notes de fiabilité et de sécurité à C, invisibles pour le Quality Gate |
+| 5 | Compléter les tests frontend, en priorité `person-details` | Couverture 27,3 % globale, 26,7 % sur `person-details` pour 281 lignes |
+| 6 | Réduire l'image backend sous 400 Mo | 558 Mo contre 70 Mo pour le frontend ; coût de transfert à chaque déploiement, et 143 paquets système à maintenir |
+| 7 | Réduire le délai de prise en charge des pull requests | Seul poste significatif du Lead Time, 54 min 30 s contre 4 à 5 min automatisés |
 
 #### Limites du relevé
 
@@ -800,7 +808,7 @@ Le projet est passé d'un dépôt sans automatisation à une chaîne complète, 
 | --- | --- | --- |
 | Intégration | Aucun workflow | 4 jobs, déclenchés sur push, pull request, nuit et manuellement |
 | Publication | Aucune | Images GHCR taguées par SHA immuable, publiées uniquement après CI verte |
-| Versionnement | Aucun | Releases SemVer avec vérification du démarrage réel du JAR |
+| Versionnement | Aucun | Releases SemVer avec vérification du démarrage réel du JAR ; **v1.0.0 publiée** le 27 septembre 2026 |
 | Qualité | Aucune analyse | SonarQube Cloud, Quality Gate bloquant, **0 avertissement d'analyse** |
 | Couverture | Non mesurée | 37,6 % global, dont 56,4 % backend via JaCoCo |
 | Périmètre analysé | **Java totalement absent** | 226 lignes Java analysées, 5 issues révélées |
@@ -824,10 +832,11 @@ Le projet est passé d'un dépôt sans automatisation à une chaîne complète, 
 Détaillées et chiffrées en 6.3. Par ordre de priorité :
 
 1. **Réduire le temps de démarrage du backend** et porter `start_period` à 60 s : 97 % du MTTR, et une menace directe sur les déploiements en machine lente.
-2. **Compléter les tests backend sur les cas d'erreur REST** : 56,4 % de couverture, deux classes de test, aucun scénario d'erreur.
-3. **Traiter les 9 bugs et 4 vulnérabilités** du code hérité, invisibles pour un Quality Gate qui ne voit que le nouveau code.
-4. **Migrer vers une base persistante externe**, prérequis absolu à toute exploitation avec des données réelles.
-5. **Ajouter un smoke test automatisé après publication**, pour qu'une image incapable de démarrer ne puisse jamais être promue.
+2. **Monter les images de base et rendre le scan d'image bloquant** : 121 vulnérabilités corrigeables sont aujourd'hui livrées sans que la chaîne ne s'en émeuve.
+3. **Compléter les tests backend sur les cas d'erreur REST** : 56,4 % de couverture, deux classes de test, aucun scénario d'erreur.
+4. **Traiter les 9 bugs et 4 vulnérabilités** du code hérité, invisibles pour un Quality Gate qui ne voit que le nouveau code.
+5. **Migrer vers une base persistante externe**, prérequis absolu à toute exploitation avec des données réelles.
+6. **Ajouter un smoke test automatisé après publication**, pour qu'une image incapable de démarrer ne puisse jamais être promue.
 
 Ces valeurs portent sur treize jours d'observation. Elles constituent une **référence initiale, pas une tendance** : trente jours d'historique, des livraisons portant du code applicatif et au moins un incident non simulé restent nécessaires avant d'en tirer des conclusions de performance.
 
